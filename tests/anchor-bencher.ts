@@ -56,7 +56,7 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it.only("Missing logs - not waiting for confirmation", async () => {
+  it("Missing logs - not waiting for confirmation", async () => {
     const { result, summary } = await bench("my test", async () => {
       let connection = anchor.getProvider().connection;
       const { blockhash } = await connection.getLatestBlockhash();
@@ -74,7 +74,7 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it("Solana sendTransaction with multiple instructions", async () => {
+  it.only("Solana sendTransaction with multiple instructions", async () => {
     const { result, summary } = await bench("my test", async () => {
       let connection = anchor.getProvider().connection;
       const { blockhash } = await connection.getLatestBlockhash();
@@ -129,7 +129,7 @@ describe("anchor-bencher", () => {
     // console.log("bench summary", summary);
   });
 
-  it("Composed Tx", async () => {
+  it.only("Composed Tx", async () => {
     const { result, summary } = await bench("composed tx bench", async () => {
       let tx = await program.methods.initialize().rpc();
       tx = await program.methods
@@ -150,47 +150,6 @@ describe("anchor-bencher", () => {
         .rpc();
     });
   });
-
-  // async function bench(name: string, fn: () => Promise<void>) {
-  //   console.log(`🏁 Benchmark: ${name}`);
-  //   const signatures: string[] = [];
-  //   const originalRpc = program.methods.initialize().rpc;
-  //   program.methods.initialize().rpc = async () => {
-  //     const tx = await originalRpc.call(program.methods.initialize());
-  //     signatures.push(tx);
-  //     console.log("Test from bench");
-  //     return tx;
-  //   };
-
-  //   // Save original send
-  //   const originalSend = anchor.AnchorProvider.local().sendAndConfirm;
-
-  //   // Monkey-patch provider.sendAndConfirm
-  //   anchor.AnchorProvider.local().sendAndConfirm = async (tx, signers, opts) => {
-  //     const sig = await originalSend.call(anchor.AnchorProvider.local(), tx, signers, opts);
-  //     signatures.push(sig);
-  //     return sig;
-  //   };
-
-  //   // Execute the test closure
-  //   await fn();
-
-  //   // Restore original
-  //   program.methods.initialize().rpc = originalRpc;
-  //   anchor.AnchorProvider.local().sendAndConfirm = originalSend;
-  //   console.log("signatures:", signatures);
-
-  //   // Fetch and analyze logs
-  //   for (const sig of signatures) {
-  //     const txInfo = await program.provider.connection.getTransaction(sig, {
-  //           maxSupportedTransactionVersion: 1,
-  //           commitment: "confirmed",
-  //         });
-  //     const logs = txInfo?.meta?.logMessages || [];
-  //     const cuLog = logs.find(l => l.includes("consumed"));
-  //     console.log(`🧾 ${sig}: ${cuLog}`);
-  //   }
-  // }
 });
 
 type BenchItem = {
@@ -219,35 +178,14 @@ export async function bench<T>(
   };
 }> {
   const connection = anchor.getProvider().connection as Connection;
-  const provider = anchor.getProvider() as any;
 
   const signatures: string[] = [];
   const timings = new Map<string, number>(); // signature -> time in ms (approx)
 
   // save originals
   const web3 = await import("@solana/web3.js");
-  const origSendTransaction = (web3.Connection.prototype as any)
-    .sendTransaction;
   const origSendRawTransaction = (web3.Connection.prototype as any)
     .sendRawTransaction;
-  const origProviderSend =
-    provider && provider.sendAndConfirm
-      ? provider.sendAndConfirm.bind(provider)
-      : null;
-
-  // // patch Connection.prototype.sendTransaction
-  // (web3.Connection.prototype as any).sendTransaction = async function (
-  //   tx: any,
-  //   signers?: any[],
-  //   opts?: any
-  // ) {
-  //   const start = Date.now();
-  //   const sig = await origSendTransaction.call(this, tx, signers, opts);
-  //   signatures.push(sig);
-  //   timings.set(sig, Date.now() - start);
-  //   return sig;
-  // };
-
   // patch Connection.prototype.sendRawTransaction
   (web3.Connection.prototype as any).sendRawTransaction = async function (
     raw: Buffer,
@@ -260,21 +198,6 @@ export async function bench<T>(
     return sig;
   };
 
-  // patch provider.sendAndConfirm if present (extra safety)
-  // if (origProviderSend) {
-  //   (provider as any).sendAndConfirm = async function (
-  //     tx: any,
-  //     signers?: any[],
-  //     opts?: any
-  //   ) {
-  //     const start = Date.now();
-  //     const sig = await origProviderSend(tx, signers, opts);
-  //     signatures.push(sig);
-  //     timings.set(sig, Date.now() - start);
-  //     return sig;
-  //   };
-  // }
-
   // Run the user closure and capture result / errors
   let result: T;
   let error: any;
@@ -286,10 +209,8 @@ export async function bench<T>(
   }
 
   // restore patched methods (important)
-  // (web3.Connection.prototype as any).sendTransaction = origSendTransaction;
   (web3.Connection.prototype as any).sendRawTransaction =
     origSendRawTransaction;
-  // if (origProviderSend) (provider as any).sendAndConfirm = origProviderSend;
 
   // If closure threw — rethrow after we finish gathering logs
   // Now fetch transaction details and compute units
