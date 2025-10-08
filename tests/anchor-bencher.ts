@@ -6,8 +6,10 @@ import {
   Keypair,
   TransactionMessage,
   VersionedTransaction,
-  sendAndConfirmTransaction
+  sendAndConfirmTransaction,
 } from "@solana/web3.js";
+import { Console } from "console";
+import { Transform } from "stream";
 
 describe("anchor-bencher", () => {
   // Configure the client to use the local cluster.
@@ -311,17 +313,16 @@ export async function bench<T>(
     throw error;
   }
 
-  // Optionally print summary
-  console.table(
+  console.log(
+    `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
+  );
+  table(
     items.map((it) => ({
-      sig: it.sig,
+      txSig: it.sig,
       ixName: it.ixName,
       CUs: it.cu ?? "-",
       ms: it.ms ?? "-",
     }))
-  );
-  console.log(
-    `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
   );
 
   return { result: result as T, summary };
@@ -334,4 +335,27 @@ async function airdrop(
 ) {
   const tx = await connection.requestAirdrop(user.publicKey, amount);
   await connection.confirmTransaction(tx);
+}
+
+// replaces native console.table to remove the first (index) column
+function table(input) {
+  // @see https://stackoverflow.com/a/67859384
+  const ts = new Transform({
+    transform(chunk, enc, cb) {
+      cb(null, chunk);
+    },
+  });
+  const logger = new Console({ stdout: ts });
+  logger.table(input);
+  const table = (ts.read() || "").toString();
+  let result = "";
+  for (let row of table.split(/[\r\n]+/)) {
+    let r = row.replace(/[^┬]*┬/, "┌");
+    r = r.replace(/^├─*┼/, "├");
+    r = r.replace(/│[^│]*/, "");
+    r = r.replace(/^└─*┴/, "└");
+    r = r.replace(/'/g, " ");
+    result += `${r}\n`;
+  }
+  console.log(result);
 }
