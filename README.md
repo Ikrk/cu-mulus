@@ -1,5 +1,6 @@
 - [x] check that `sendRawTransaction` is called everytime for different sending methods
-- [ ] make sure to show a warning when tx logs are missing
+- [x] make sure to show a warning when tx logs are missing
+- [ ] make sure everything works correctly if error is returned
 - [ ] add option to show instruction name and/or transaction signature
 - [ ] show CPIs as nested instructions with their own CUs
 - [ ] display CU change compared to previous benchmark

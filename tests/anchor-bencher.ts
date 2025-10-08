@@ -51,12 +51,30 @@ describe("anchor-bencher", () => {
             await connection.getLatestBlockhash()
           ).lastValidBlockHeight,
         },
-        "confirmed"
+        "processed"
       );
     });
   });
 
-  it.only("Solana sendTransaction with multiple instructions", async () => {
+  it.only("Missing logs - not waiting for confirmation", async () => {
+    const { result, summary } = await bench("my test", async () => {
+      let connection = anchor.getProvider().connection;
+      const { blockhash } = await connection.getLatestBlockhash();
+
+      let ix = await program.methods.initialize().instruction();
+      // Create the transaction message
+      const message = new TransactionMessage({
+        payerKey: anchor.getProvider().wallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [ix],
+      }).compileToV0Message();
+      let tx = new VersionedTransaction(message);
+      tx.sign([anchor.getProvider().wallet.payer]);
+      let sig = await anchor.getProvider().connection.sendTransaction(tx);
+    });
+  });
+
+  it("Solana sendTransaction with multiple instructions", async () => {
     const { result, summary } = await bench("my test", async () => {
       let connection = anchor.getProvider().connection;
       const { blockhash } = await connection.getLatestBlockhash();
@@ -327,6 +345,10 @@ export async function bench<T>(
           break;
         }
       }
+    } else {
+      console.warn(
+        `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for transaction ${sig} - could not parse instruction names and CU values`
+      );
     }
 
     if (cu) totalCU += cu;
