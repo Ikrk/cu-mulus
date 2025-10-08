@@ -1,7 +1,13 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { AnchorBencher } from "../target/types/anchor_bencher";
-import { Connection, Keypair } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  TransactionMessage,
+  VersionedTransaction,
+  sendAndConfirmTransaction
+} from "@solana/web3.js";
 
 describe("anchor-bencher", () => {
   // Configure the client to use the local cluster.
@@ -14,9 +20,47 @@ describe("anchor-bencher", () => {
     await airdrop(anchor.getProvider().connection, user);
   });
 
-  it("Is initialized!", async () => {
+  it("Anchor rpc send", async () => {
     const { result, summary } = await bench("my test", async () => {
-      const tx = await program.methods.initialize().rpc();
+      await program.methods.initialize().rpc();
+    });
+  });
+
+  it("Solana sendTransaction (VersionedTransaction)", async () => {
+    const { result, summary } = await bench("my test", async () => {
+      let connection = anchor.getProvider().connection;
+      const { blockhash } = await connection.getLatestBlockhash();
+
+      let ix = await program.methods.initialize().instruction();
+      // Create the transaction message
+      const message = new TransactionMessage({
+        payerKey: anchor.getProvider().wallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [ix],
+      }).compileToV0Message();
+      let tx = new VersionedTransaction(message);
+      tx.sign([anchor.getProvider().wallet.payer]);
+      let sig = await anchor.getProvider().connection.sendTransaction(tx);
+      await connection.confirmTransaction(
+        {
+          signature: sig,
+          blockhash,
+          lastValidBlockHeight: (
+            await connection.getLatestBlockhash()
+          ).lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+    });
+  });
+
+  it.only("Solana sendAndConfirmTransaction", async () => {
+    const { result, summary } = await bench("my test", async () => {
+      let connection = anchor.getProvider().connection;
+      const { blockhash } = await connection.getLatestBlockhash();
+
+      let tx = await program.methods.initialize().transaction();
+      let sig = await sendAndConfirmTransaction(connection, tx, [anchor.getProvider().wallet.payer]);
     });
   });
 
@@ -28,19 +72,29 @@ describe("anchor-bencher", () => {
         .signers([user])
         .rpc();
     });
-    console.log("bench summary", summary);
+    // console.log("bench summary", summary);
   });
 
   it("Composed Tx", async () => {
     const { result, summary } = await bench("composed tx bench", async () => {
-      await program.methods.initialize().rpc();
-      await program.methods
+      let tx = await program.methods.initialize().rpc();
+      tx = await program.methods
         .test()
         .accounts({ user: user.publicKey })
         .signers([user])
         .rpc();
     });
-    console.log("bench summary", summary);
+  });
+
+  it("CPI", async () => {
+    const { result, summary } = await bench("cpi bench", async () => {
+      let userAccount = Keypair.generate();
+      await program.methods
+        .testWithCpi()
+        .accounts({ user: user.publicKey, userAccount: userAccount.publicKey })
+        .signers([user, userAccount])
+        .rpc();
+    });
   });
 
   // async function bench(name: string, fn: () => Promise<void>) {
@@ -87,6 +141,7 @@ describe("anchor-bencher", () => {
 
 type BenchItem = {
   sig: string;
+  ixName: string;
   cu?: number;
   ms?: number;
   logs?: string[];
@@ -194,6 +249,7 @@ export async function bench<T>(
       for (let attempt = 0; attempt < opts.getTxRetries; attempt++) {
         try {
           txInfo = await connection.getTransaction(sig, {
+            maxSupportedTransactionVersion: 1,
             commitment: "confirmed",
           });
         } catch (e) {
@@ -205,10 +261,12 @@ export async function bench<T>(
       }
     } else {
       txInfo = await connection.getTransaction(sig, {
+        maxSupportedTransactionVersion: 1,
         commitment: "confirmed",
       });
     }
 
+    console.log(txInfo);
     const logs: string[] | undefined = txInfo?.meta?.logMessages;
     // Newer runtime may set computeUnitsConsumed in meta; fallback to parsing logs
     let cu: number | undefined =
@@ -223,9 +281,20 @@ export async function bench<T>(
         }
       }
     }
+    let ixName = "unknown";
+    if (logs) {
+      // parse first occurrence of 'Instruction: ' pattern
+      for (let i = 0; i < logs.length; i++) {
+        const m = logs[i].match(/Instruction:\s+([^\s]+)/);
+        if (m) {
+          ixName = m ? m[1] : "unknown";
+          break;
+        }
+      }
+    }
 
     if (cu) totalCU += cu;
-    const item: BenchItem = { sig, cu, ms: timings.get(sig), logs };
+    const item: BenchItem = { sig, ixName, cu, ms: timings.get(sig), logs };
     items.push(item);
   }
 
@@ -244,7 +313,12 @@ export async function bench<T>(
 
   // Optionally print summary
   console.table(
-    items.map((it) => ({ sig: it.sig, cu: it.cu ?? "-", ms: it.ms ?? "-" }))
+    items.map((it) => ({
+      sig: it.sig,
+      ixName: it.ixName,
+      CUs: it.cu ?? "-",
+      ms: it.ms ?? "-",
+    }))
   );
   console.log(
     `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
