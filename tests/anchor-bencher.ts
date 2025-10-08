@@ -56,13 +56,47 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it.only("Solana sendAndConfirmTransaction", async () => {
+  it.only("Solana sendTransaction with multiple instructions", async () => {
+    const { result, summary } = await bench("my test", async () => {
+      let connection = anchor.getProvider().connection;
+      const { blockhash } = await connection.getLatestBlockhash();
+
+      let ix1 = await program.methods.initialize().instruction();
+      let ix2 = await program.methods
+        .test()
+        .accounts({ user: user.publicKey })
+        .instruction();
+      // Create the transaction message
+      const message = new TransactionMessage({
+        payerKey: anchor.getProvider().wallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [ix1, ix2],
+      }).compileToV0Message();
+      let tx = new VersionedTransaction(message);
+      tx.sign([anchor.getProvider().wallet.payer, user]);
+      let sig = await anchor.getProvider().connection.sendTransaction(tx);
+      await connection.confirmTransaction(
+        {
+          signature: sig,
+          blockhash,
+          lastValidBlockHeight: (
+            await connection.getLatestBlockhash()
+          ).lastValidBlockHeight,
+        },
+        "confirmed"
+      );
+    });
+  });
+
+  it("Solana sendAndConfirmTransaction", async () => {
     const { result, summary } = await bench("my test", async () => {
       let connection = anchor.getProvider().connection;
       const { blockhash } = await connection.getLatestBlockhash();
 
       let tx = await program.methods.initialize().transaction();
-      let sig = await sendAndConfirmTransaction(connection, tx, [anchor.getProvider().wallet.payer]);
+      let sig = await sendAndConfirmTransaction(connection, tx, [
+        anchor.getProvider().wallet.payer,
+      ]);
     });
   });
 
