@@ -20,6 +20,9 @@ pub mod anchor_bencher {
         ctx.accounts.user_account.age = 30;
         Ok(())
     }
+    pub fn test_with_error(ctx: Context<CreateUser>) -> Result<()> {
+        err!(MyError::SomeError)
+    }
 }
 
 #[derive(Accounts)]
@@ -64,4 +67,9 @@ pub struct User {
     #[max_len(100)]
     pub name: String,
     pub age: u8,
+}
+
+#[error_code]
+pub enum MyError {
+    SomeError
 }

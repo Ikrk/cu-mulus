@@ -74,7 +74,7 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it.only("Solana sendTransaction with multiple instructions", async () => {
+  it("Solana sendTransaction with multiple instructions", async () => {
     const { result, summary } = await bench("my test", async () => {
       let connection = anchor.getProvider().connection;
       const { blockhash } = await connection.getLatestBlockhash();
@@ -129,7 +129,7 @@ describe("anchor-bencher", () => {
     // console.log("bench summary", summary);
   });
 
-  it.only("Composed Tx", async () => {
+  it("Composed Tx", async () => {
     const { result, summary } = await bench("composed tx bench", async () => {
       let tx = await program.methods.initialize().rpc();
       tx = await program.methods
@@ -140,14 +140,25 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it("CPI", async () => {
+  it.only("CPI", async () => {
     const { result, summary } = await bench("cpi bench", async () => {
-      let userAccount = Keypair.generate();
+      let mint = Keypair.generate();
       await program.methods
         .testWithCpi()
-        .accounts({ user: user.publicKey, userAccount: userAccount.publicKey })
-        .signers([user, userAccount])
+        .accounts({ user: user.publicKey, mint: mint.publicKey })
+        .signers([user, mint])
         .rpc();
+    });
+  });
+
+  it.skip("Error", async () => {
+    const { result, summary } = await bench("cpi bench", async () => {
+      let mint = Keypair.generate();
+      await program.methods
+        .testWithError()
+        .accounts({ user: user.publicKey, mint: mint.publicKey })
+        .signers([user, mint])
+        .rpc({skipPreflight: true});
     });
   });
 });
