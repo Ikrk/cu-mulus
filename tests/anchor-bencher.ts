@@ -163,12 +163,27 @@ describe("anchor-bencher", () => {
   });
 });
 
-type BenchItem = {
+type BenchTx = {
   sig: string;
-  ixName: string;
+  ixs: BenchIx[];
   cu?: number;
   ms?: number;
   logs?: string[];
+};
+
+type BenchIx = {
+  ixName: string;
+  program: string;
+  nestedLevel: number;
+  cu?: number;
+  ms?: number;
+};
+
+type BenchSummary = {
+  name: string;
+  txs: BenchTx[];
+  totalCU: number;
+  totalTimeMs: number;
 };
 
 export async function bench<T>(
@@ -181,12 +196,7 @@ export async function bench<T>(
   }
 ): Promise<{
   result: T;
-  summary: {
-    name: string;
-    items: BenchItem[];
-    totalCU: number;
-    totalTimeMs: number;
-  };
+  summary: BenchSummary;
 }> {
   const connection = anchor.getProvider().connection as Connection;
 
@@ -225,8 +235,15 @@ export async function bench<T>(
 
   // If closure threw — rethrow after we finish gathering logs
   // Now fetch transaction details and compute units
-  const items: BenchItem[] = [];
+  const txs: BenchTx[] = [];
   let totalCU = 0;
+
+  let bench: BenchSummary = {
+    name,
+    txs: [],
+    totalCU: 0,
+    totalTimeMs: 0,
+  };
 
   for (const sig of signatures) {
     let txInfo: any = null;
@@ -284,19 +301,29 @@ export async function bench<T>(
     }
 
     if (cu) totalCU += cu;
-    const item: BenchItem = { sig, ixName, cu, ms: timings.get(sig), logs };
-    items.push(item);
+    let ix: BenchIx = {
+      ixName,
+      program: "unknown",
+      nestedLevel: 0,
+      cu: cu ?? 0,
+    };
+    let ixs = [ix]; // TODO parse ixs from logs
+
+    const tx: BenchTx = { sig, ixs, cu, ms: timings.get(sig), logs };
+    txs.push(tx);
   }
 
   const totalTimeMs = Date.now() - overallStart;
-
-  const summary = { name, items, totalCU, totalTimeMs };
+  bench.totalCU = totalCU;
+  bench.totalTimeMs = totalTimeMs;
+  bench.txs = txs;
+  // const summary = { name, items: txs, totalCU, totalTimeMs };
 
   if (error) {
     // attach summary to error or log
     console.warn(
       `[bench:${name}] error occurred, returning summary so you can debug`,
-      summary
+      bench
     );
     throw error;
   }
@@ -305,15 +332,15 @@ export async function bench<T>(
     `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
   );
   table(
-    items.map((it) => ({
+    txs.map((it) => ({
       txSig: it.sig,
-      ixName: it.ixName,
+      ixName: it.ixs[0]?.ixName ?? "unknown",
       CUs: it.cu ?? "-",
       ms: it.ms ?? "-",
     }))
   );
 
-  return { result: result as T, summary };
+  return { result: result as T, bench };
 }
 
 async function airdrop(
