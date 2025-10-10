@@ -140,7 +140,7 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it.only("CPI", async () => {
+  it("CPI", async () => {
     const { result, summary } = await bench("cpi bench", async () => {
       let mint = Keypair.generate();
       await program.methods
@@ -149,6 +149,7 @@ describe("anchor-bencher", () => {
         .signers([user, mint])
         .rpc();
     });
+    // console.log(summary);
   });
 
   it.skip("Error", async () => {
@@ -158,7 +159,7 @@ describe("anchor-bencher", () => {
         .testWithError()
         .accounts({ user: user.publicKey, mint: mint.publicKey })
         .signers([user, mint])
-        .rpc({skipPreflight: true});
+        .rpc({ skipPreflight: true });
     });
   });
 });
@@ -175,8 +176,8 @@ type BenchIx = {
   ixName: string;
   program: string;
   nestedLevel: number;
+  cpis: BenchIx[];
   cu?: number;
-  ms?: number;
 };
 
 type BenchSummary = {
@@ -269,7 +270,7 @@ export async function bench<T>(
       });
     }
 
-    console.log(txInfo);
+    // console.log(txInfo);
     const logs: string[] | undefined = txInfo?.meta?.logMessages;
     // Newer runtime may set computeUnitsConsumed in meta; fallback to parsing logs
     let cu: number | undefined =
@@ -284,16 +285,10 @@ export async function bench<T>(
         }
       }
     }
-    let ixName = "unknown";
+    let ixs: BenchIx[] = [];
     if (logs) {
-      // parse first occurrence of 'Instruction: ' pattern
-      for (let i = 0; i < logs.length; i++) {
-        const m = logs[i].match(/Instruction:\s+([^\s]+)/);
-        if (m) {
-          ixName = m ? m[1] : "unknown";
-          break;
-        }
-      }
+      // parse logs
+      ixs = parseLogsForIxs(logs);
     } else {
       console.warn(
         `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for transaction ${sig} - could not parse instruction names and CU values`
@@ -301,13 +296,6 @@ export async function bench<T>(
     }
 
     if (cu) totalCU += cu;
-    let ix: BenchIx = {
-      ixName,
-      program: "unknown",
-      nestedLevel: 0,
-      cu: cu ?? 0,
-    };
-    let ixs = [ix]; // TODO parse ixs from logs
 
     const tx: BenchTx = { sig, ixs, cu, ms: timings.get(sig), logs };
     txs.push(tx);
@@ -328,19 +316,114 @@ export async function bench<T>(
     throw error;
   }
 
-  console.log(
-    `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
-  );
-  table(
-    txs.map((it) => ({
-      txSig: it.sig,
-      ixName: it.ixs[0]?.ixName ?? "unknown",
-      CUs: it.cu ?? "-",
-      ms: it.ms ?? "-",
-    }))
-  );
+  // console.log(
+  //   `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
+  // );
+  printBenchSummary(bench);
+  return { result: result as T, summary: bench };
+}
 
-  return { result: result as T, bench };
+function parseLogsForIxs(logs: string[]): BenchIx[] {
+  let level = -1;
+  let ixs: BenchIx[][] = [];
+
+  for (let i = 0; i < logs.length; i++) {
+    // detect new program invocation
+    const matchNewInvocation = logs[i].match(
+      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+invoke\b/
+    );
+    if (matchNewInvocation) {
+      level++;
+      let programAddress = matchNewInvocation
+        ? matchNewInvocation[1]
+        : "unknown program";
+      let newIx: BenchIx = {
+        ixName: "unknown",
+        program: programAddress,
+        nestedLevel: level,
+        cpis: [],
+        cu: 0,
+      };
+      if (ixs.length - 1 < level) {
+        ixs.push([]);
+      }
+      ixs[level].push(newIx);
+      continue;
+    }
+    // detect instruction mame
+    const matchIxName = logs[i].match(/Instruction:\s+([^\s]+)/);
+    if (matchIxName) {
+      let ixName = matchIxName ? matchIxName[1] : "unknown ix";
+      if (ixs.length > 0) {
+        ixs[level][ixs[level].length - 1].ixName = ixName;
+      }
+      continue;
+    }
+    // detect consumed units
+    const matchCUs = logs[i].match(/consumed\s+(\d+)\s+of/i);
+    if (matchCUs) {
+      let cu = Number(matchCUs[1]);
+      ixs[level][ixs[level].length - 1].cu = cu;
+      continue;
+    }
+    // detect end of program invocation mame
+    const matchInvocationEnd = logs[i].match(
+      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+success\b/
+    );
+    if (matchInvocationEnd) {
+      if (ixs.length > level) {
+        // save the cpis to last ix at the current level
+        ixs[level][ixs[level].length - 1].cpis = ixs[level + 1];
+        // reset nested cpis
+        ixs[level + 1] = [];
+      }
+      level--;
+      continue;
+    }
+  }
+  return ixs[0] ?? [];
+}
+
+function printBenchSummary(summary: BenchSummary): void {
+  console.log(`\n=== Benchmark Summary: ${summary.name} ===`);
+  console.log(`Total Transactions: ${summary.txs.length}`);
+  console.log(`Total CU: ${summary.totalCU}`);
+  console.log(`Total Time: ${summary.totalTimeMs.toFixed(2)} ms\n`);
+
+  summary.txs.forEach((tx, i) => {
+    console.log(`Tx #${i + 1} — ${tx.sig}`);
+    console.log(`  CU: ${tx.cu ?? "–"}`);
+    console.log(`  Time: ${tx.ms?.toFixed(2) ?? "–"} ms`);
+    console.log(`  Instructions: ${tx.ixs.length}`);
+
+    // Flatten all nested instructions for table display
+    const flattenedIxs = flattenIxs(tx.ixs);
+    if (flattenedIxs.length > 0) {
+      table(
+        flattenedIxs.map((ix) => ({
+          Level: ix.nestedLevel,
+          Instruction: `${" ".repeat(ix.nestedLevel * 2)}${ix.ixName}`,
+          Program: ix.program,
+          CU: ix.cu && ix.cu > 0 ? ix.cu : "-",
+        }))
+      );
+    }
+  });
+}
+
+/**
+ * Recursively flatten all nested instructions (CPIs)
+ */
+function flattenIxs(ixs: BenchIx[], level = 0): BenchIx[] {
+  const result: BenchIx[] = [];
+  for (const ix of ixs) {
+    const copy = { ...ix, nestedLevel: level };
+    result.push(copy);
+    if (ix.cpis && ix.cpis.length > 0) {
+      result.push(...flattenIxs(ix.cpis, level + 1));
+    }
+  }
+  return result;
 }
 
 async function airdrop(
@@ -364,13 +447,18 @@ function table(input) {
   logger.table(input);
   const table = (ts.read() || "").toString();
   let result = "";
-  for (let row of table.split(/[\r\n]+/)) {
+
+  const rows = table.split(/[\r\n]+/);
+  for (let i = 0; i < rows.length; i++) {
+    let row = rows[i];
     let r = row.replace(/[^┬]*┬/, "┌");
     r = r.replace(/^├─*┼/, "├");
     r = r.replace(/│[^│]*/, "");
     r = r.replace(/^└─*┴/, "└");
     r = r.replace(/'/g, " ");
-    result += `${r}\n`;
+    // Add newline only if not the last row
+    result += r;
+    if (i < rows.length - 1) result += "\n";
   }
   console.log(result);
 }
