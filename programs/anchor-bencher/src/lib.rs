@@ -5,12 +5,17 @@ declare_id!("5oB6pCT1QfSNykDaG41KiUHqW3AVVMjfk6QMhyXc7Sm");
 
 #[program]
 pub mod anchor_bencher {
-    use anchor_lang::{solana_program::{instruction::Instruction, program::invoke}, InstructionData};
+    use anchor_lang::{
+        solana_program::{instruction::Instruction, program::invoke}, system_program::{ transfer, Transfer }, InstructionData
+    };
 
     use super::*;
 
-    pub fn initialize(_ctx: Context<Initialize>) -> Result<()> {
+    pub fn initialize(_ctx: Context<Empty>) -> Result<()> {
         Ok(())
+    }
+    pub fn test_simple_error(_ctx: Context<Empty>) -> Result<()> {
+        err!(MyError::SomeError)
     }
     pub fn test(ctx: Context<Test>) -> Result<()> {
         msg!("User key: {:?}", ctx.accounts.user.key());
@@ -21,20 +26,16 @@ pub mod anchor_bencher {
         ctx.accounts.user_account.age = 30;
         let ix = Instruction {
             program_id: crate::ID,
-            accounts: vec![
-                AccountMeta::new(ctx.accounts.user.key(), true),
-            ],
-            data: crate::instruction::TestNestedCpi{}.data()
+            accounts: vec![AccountMeta::new(ctx.accounts.user.key(), true)],
+            data: crate::instruction::TestNestedCpi {}.data(),
         };
 
         invoke(&ix, &[ctx.accounts.user.to_account_info()])?;
 
         let ix = Instruction {
             program_id: crate::ID,
-            accounts: vec![
-                AccountMeta::new(ctx.accounts.user.key(), true),
-            ],
-            data: crate::instruction::TestCpi2{}.data()
+            accounts: vec![AccountMeta::new(ctx.accounts.user.key(), true)],
+            data: crate::instruction::TestCpi2 {}.data(),
         };
 
         invoke(&ix, &[ctx.accounts.user.to_account_info()])?;
@@ -44,10 +45,8 @@ pub mod anchor_bencher {
         msg!("Test CPI 1");
         let ix = Instruction {
             program_id: crate::ID,
-            accounts: vec![
-                AccountMeta::new(ctx.accounts.user.key(), true),
-            ],
-            data: crate::instruction::TestCpi2{}.data()
+            accounts: vec![AccountMeta::new(ctx.accounts.user.key(), true)],
+            data: crate::instruction::TestCpi2 {}.data(),
         };
 
         invoke(&ix, &[ctx.accounts.user.to_account_info()])?;
@@ -57,13 +56,36 @@ pub mod anchor_bencher {
         msg!("Test CPI 2");
         Ok(())
     }
-    pub fn test_with_error(_ctx: Context<CreateUser>) -> Result<()> {
+    pub fn test_with_error(ctx: Context<CreateUser>) -> Result<()> {
+        let from_pubkey = ctx.accounts.user.to_account_info();
+        let to_pubkey = ctx.accounts.user_account.to_account_info();
+        let program_id = ctx.accounts.system_program.to_account_info();
+
+        let cpi_context = CpiContext::new(
+            program_id,
+            Transfer {
+                from: from_pubkey,
+                to: to_pubkey,
+            },
+        );
+
+        // this should fail due to insufficient funds
+        transfer(cpi_context, 10e12 as u64)?;
+        // the following cpi should not be invoked
+        let ix = Instruction {
+            program_id: crate::ID,
+            accounts: vec![AccountMeta::new(ctx.accounts.user.key(), true)],
+            data: crate::instruction::TestCpi2 {}.data(),
+        };
+
+        invoke(&ix, &[ctx.accounts.user.to_account_info()])?;
+        // Make sure this will fail
         err!(MyError::SomeError)
     }
 }
 
 #[derive(Accounts)]
-pub struct Initialize {}
+pub struct Empty {}
 
 #[derive(Accounts)]
 pub struct Test<'info> {

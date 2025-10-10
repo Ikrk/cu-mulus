@@ -84,15 +84,18 @@ describe("anchor-bencher", () => {
         .test()
         .accounts({ user: user.publicKey })
         .instruction();
+      let ix3 = await program.methods.testSimpleError().instruction();
       // Create the transaction message
       const message = new TransactionMessage({
         payerKey: anchor.getProvider().wallet.publicKey,
         recentBlockhash: blockhash,
-        instructions: [ix1, ix2],
+        instructions: [ix1, ix2, ix3],
       }).compileToV0Message();
       let tx = new VersionedTransaction(message);
       tx.sign([anchor.getProvider().wallet.payer, user]);
-      let sig = await anchor.getProvider().connection.sendTransaction(tx);
+      let sig = await anchor.getProvider().connection.sendTransaction(tx, {
+        skipPreflight: true,
+      });
       await connection.confirmTransaction(
         {
           signature: sig,
@@ -174,6 +177,7 @@ type BenchTx = {
 
 type BenchIx = {
   ixName: string;
+  status: string;
   program: string;
   nestedLevel: number;
   cpis: BenchIx[];
@@ -307,19 +311,20 @@ export async function bench<T>(
   bench.txs = txs;
   // const summary = { name, items: txs, totalCU, totalTimeMs };
 
-  if (error) {
-    // attach summary to error or log
-    console.warn(
-      `[bench:${name}] error occurred, returning summary so you can debug`,
-      bench
-    );
-    throw error;
-  }
-
   // console.log(
   //   `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
   // );
   printBenchSummary(bench);
+
+  if (error) {
+    // attach summary to error or log
+    // console.warn(
+    //   `[bench:${name}] error occurred, returning summary so you can debug`,
+    //   bench
+    // );
+    throw error;
+  }
+
   return { result: result as T, summary: bench };
 }
 
@@ -339,6 +344,7 @@ function parseLogsForIxs(logs: string[]): BenchIx[] {
         : "unknown program";
       let newIx: BenchIx = {
         ixName: "unknown",
+        status: "unknown",
         program: programAddress,
         nestedLevel: level,
         cpis: [],
@@ -368,9 +374,11 @@ function parseLogsForIxs(logs: string[]): BenchIx[] {
     }
     // detect end of program invocation mame
     const matchInvocationEnd = logs[i].match(
-      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+success\b/
+      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+(success|failed)\b/
     );
     if (matchInvocationEnd) {
+      let status = matchInvocationEnd[2];
+      ixs[level][ixs[level].length - 1].status = status;
       if (ixs.length > level) {
         // save the cpis to last ix at the current level
         ixs[level][ixs[level].length - 1].cpis = ixs[level + 1];
@@ -400,12 +408,24 @@ function printBenchSummary(summary: BenchSummary): void {
     const flattenedIxs = flattenIxs(tx.ixs);
     if (flattenedIxs.length > 0) {
       table(
-        flattenedIxs.map((ix) => ({
-          Level: ix.nestedLevel,
-          Instruction: ix.nestedLevel === 0 ? `* ${ix.ixName}` : `${" ".repeat(ix.nestedLevel * 2)}${ix.ixName}`,
-          Program: `${" ".repeat(ix.nestedLevel * 2)}${ix.program}`,
-          CU: ix.cu && ix.cu > 0 ? ix.cu : "-",
-        }))
+        flattenedIxs.map((ix) => {
+          const indent = " ".repeat(ix.nestedLevel * 2);
+          const isRoot = ix.nestedLevel === 0;
+          const cuDisplay = ix.cu && ix.cu > 0 ? ix.cu : "-";
+          const status = ix.status === "success" ? `✓` : `✗`;
+          const instructionLabel = isRoot
+            ? `${status} ${ix.ixName}`
+            : `${indent}${ix.ixName}`;
+
+          const programLabel = `${indent}${ix.program}`;
+
+          return {
+            Level: ix.nestedLevel,
+            Instruction: instructionLabel,
+            Program: programLabel,
+            CU: cuDisplay,
+          };
+        })
       );
     }
   });
@@ -436,7 +456,12 @@ async function airdrop(
 }
 
 // replaces native console.table to remove the first (index) column
-function table(input) {
+function table(input: any) {
+  // this is a workaround for this table function not supporting colors as toString strips the ANSI sequences
+  // therefore we just color the ✓ and ✗ characters manually
+  const GREEN_BOLD = "\x1b[1;32m";
+  const RED_BOLD = "\x1b[1;31m";
+  const RESET = "\x1b[0m";
   // @see https://stackoverflow.com/a/67859384
   const ts = new Transform({
     transform(chunk, enc, cb) {
@@ -456,6 +481,8 @@ function table(input) {
     r = r.replace(/│[^│]*/, "");
     r = r.replace(/^└─*┴/, "└");
     r = r.replace(/'/g, " ");
+    r = r.replace(/✓/, `${GREEN_BOLD}✓${RESET}`);
+    r = r.replace(/✗/, `${RED_BOLD}✗${RESET}`);
     // Add newline only if not the last row
     result += r;
     if (i < rows.length - 1) result += "\n";
