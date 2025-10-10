@@ -2,15 +2,15 @@
 - [x] make sure to show a warning when tx logs are missing
 - [ ] make sure everything works correctly if error is returned
 - [ ] add option to show instruction name and/or transaction signature
-- [ ] show CPIs as nested instructions with their own CUs
+- [x] show CPIs as nested instructions with their own CUs
 - [ ] display CU change compared to previous benchmark
-- [ ] visually distinguish transactions/instructions/CPIs
+- [x] visually distinguish transactions/instructions/CPIs
 - [ ] enable benchmarking only if `--bench` flag is provided
 - [ ] show nested instructions only if `--verbose` flag is provided
 - [ ] save benchmark results to a file
 - [ ] patch mocha's it and add it.bench for convenience
 
-- [ ] show program pubkeys with CPI ix name
+- [x] show program pubkeys with CPI ix name
 - [ ] allow displaying short signatures and pubkeys such as `Tokenke...Q5DA` (first 7 and last 4 characters)
 - [ ] Add possibility to replace program pubkeys by human readable name
 - [ ] Automatically replace common program pubkeys with human-readable names

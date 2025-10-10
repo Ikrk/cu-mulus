@@ -1,14 +1,15 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Token, TokenAccount, Mint};
+use anchor_spl::token::{Mint, Token};
 
 declare_id!("5oB6pCT1QfSNykDaG41KiUHqW3AVVMjfk6QMhyXc7Sm");
 
 #[program]
 pub mod anchor_bencher {
+    use anchor_lang::{solana_program::{instruction::Instruction, program::invoke}, InstructionData};
+
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        // msg!("Greetings from: {:?}", ctx.program_id);
+    pub fn initialize(_ctx: Context<Initialize>) -> Result<()> {
         Ok(())
     }
     pub fn test(ctx: Context<Test>) -> Result<()> {
@@ -18,9 +19,45 @@ pub mod anchor_bencher {
     pub fn test_with_cpi(ctx: Context<CreateUser>) -> Result<()> {
         ctx.accounts.user_account.name = "John".to_string();
         ctx.accounts.user_account.age = 30;
+        let ix = Instruction {
+            program_id: crate::ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.user.key(), true),
+            ],
+            data: crate::instruction::TestNestedCpi{}.data()
+        };
+
+        invoke(&ix, &[ctx.accounts.user.to_account_info()])?;
+
+        let ix = Instruction {
+            program_id: crate::ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.user.key(), true),
+            ],
+            data: crate::instruction::TestCpi2{}.data()
+        };
+
+        invoke(&ix, &[ctx.accounts.user.to_account_info()])?;
         Ok(())
     }
-    pub fn test_with_error(ctx: Context<CreateUser>) -> Result<()> {
+    pub fn test_nested_cpi(ctx: Context<Test>) -> Result<()> {
+        msg!("Test CPI 1");
+        let ix = Instruction {
+            program_id: crate::ID,
+            accounts: vec![
+                AccountMeta::new(ctx.accounts.user.key(), true),
+            ],
+            data: crate::instruction::TestCpi2{}.data()
+        };
+
+        invoke(&ix, &[ctx.accounts.user.to_account_info()])?;
+        Ok(())
+    }
+    pub fn test_cpi_2(_ctx: Context<Test>) -> Result<()> {
+        msg!("Test CPI 2");
+        Ok(())
+    }
+    pub fn test_with_error(_ctx: Context<CreateUser>) -> Result<()> {
         err!(MyError::SomeError)
     }
 }
@@ -71,5 +108,5 @@ pub struct User {
 
 #[error_code]
 pub enum MyError {
-    SomeError
+    SomeError,
 }

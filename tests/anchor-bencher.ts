@@ -402,8 +402,8 @@ function printBenchSummary(summary: BenchSummary): void {
       table(
         flattenedIxs.map((ix) => ({
           Level: ix.nestedLevel,
-          Instruction: `${" ".repeat(ix.nestedLevel * 2)}${ix.ixName}`,
-          Program: ix.program,
+          Instruction: ix.nestedLevel === 0 ? `* ${ix.ixName}` : `${" ".repeat(ix.nestedLevel * 2)}${ix.ixName}`,
+          Program: `${" ".repeat(ix.nestedLevel * 2)}${ix.program}`,
           CU: ix.cu && ix.cu > 0 ? ix.cu : "-",
         }))
       );
