@@ -74,7 +74,7 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it("Solana sendTransaction with multiple instructions", async () => {
+  it.only("Solana sendTransaction with multiple instructions", async () => {
     const { result, summary } = await bench("my test", async () => {
       let connection = anchor.getProvider().connection;
       const { blockhash } = await connection.getLatestBlockhash();
@@ -93,9 +93,7 @@ describe("anchor-bencher", () => {
       }).compileToV0Message();
       let tx = new VersionedTransaction(message);
       tx.sign([anchor.getProvider().wallet.payer, user]);
-      let sig = await anchor.getProvider().connection.sendTransaction(tx, {
-        skipPreflight: true,
-      });
+      let sig = await anchor.getProvider().connection.sendTransaction(tx);
       await connection.confirmTransaction(
         {
           signature: sig,
@@ -314,14 +312,23 @@ export async function bench<T>(
   // console.log(
   //   `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
   // );
+  if (error) {
+    const logs = error.logs;
+    const ixs = parseLogsForIxs(logs);
+    // TODO calculate cu and timings
+    const tx: BenchTx = { sig: "Failed during simulation", ixs, cu: 0, ms: 0, logs };
+    bench.txs.push(tx);
+    // TODO increment cus and time
+  }
   printBenchSummary(bench);
 
   if (error) {
     // attach summary to error or log
-    // console.warn(
-    //   `[bench:${name}] error occurred, returning summary so you can debug`,
-    //   bench
-    // );
+    console.warn(
+      `[bench:${name}] error occurred, returning summary so you can debug`,
+      bench
+    );
+    // console.log(error.logs);
     throw error;
   }
 
