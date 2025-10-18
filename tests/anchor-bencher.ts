@@ -4,12 +4,17 @@ import { AnchorBencher } from "../target/types/anchor_bencher";
 import {
   Connection,
   Keypair,
+  SendTransactionError,
   TransactionMessage,
   VersionedTransaction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
 import { Console } from "console";
 import { Transform } from "stream";
+
+const GREEN_BOLD = "\x1b[1;32m";
+const RED_BOLD = "\x1b[1;31m";
+const RESET = "\x1b[0m";
 
 describe("anchor-bencher", () => {
   // Configure the client to use the local cluster.
@@ -74,7 +79,7 @@ describe("anchor-bencher", () => {
     });
   });
 
-  it.only("Solana sendTransaction with multiple instructions", async () => {
+  it("Solana sendTransaction with multiple failed and successful instructions", async () => {
     const { result, summary } = await bench("my test", async () => {
       let connection = anchor.getProvider().connection;
       const { blockhash } = await connection.getLatestBlockhash();
@@ -93,17 +98,33 @@ describe("anchor-bencher", () => {
       }).compileToV0Message();
       let tx = new VersionedTransaction(message);
       tx.sign([anchor.getProvider().wallet.payer, user]);
-      let sig = await anchor.getProvider().connection.sendTransaction(tx);
-      await connection.confirmTransaction(
-        {
-          signature: sig,
-          blockhash,
-          lastValidBlockHeight: (
-            await connection.getLatestBlockhash()
-          ).lastValidBlockHeight,
-        },
-        "confirmed"
-      );
+      try {
+        let sig = await anchor.getProvider().connection.sendTransaction(tx);
+        await connection.confirmTransaction(
+          {
+            signature: sig,
+            blockhash,
+            lastValidBlockHeight: (
+              await connection.getLatestBlockhash()
+            ).lastValidBlockHeight,
+          },
+          "confirmed"
+        );
+      } catch (error) {
+        // everything under control
+      }
+      // test that the failed transactions will have correct transaction id even if successful transactions are included
+      await program.methods.test().rpc();
+      try {
+        let mint = Keypair.generate();
+        await program.methods
+          .testWithError()
+          .accounts({ user: user.publicKey, mint: mint.publicKey })
+          .signers([user, mint])
+          .rpc({ skipPreflight: true });
+      } catch (error) {
+        // everything under control
+      }
     });
   });
 
@@ -166,7 +187,9 @@ describe("anchor-bencher", () => {
 });
 
 type BenchTx = {
+  id: number;
   sig: string;
+  status: string;
   ixs: BenchIx[];
   cu?: number;
   ms?: number;
@@ -189,6 +212,11 @@ type BenchSummary = {
   totalTimeMs: number;
 };
 
+type Signature = {
+  id: number;
+  sig: string;
+};
+
 export async function bench<T>(
   name: string,
   fn: () => Promise<T>,
@@ -203,8 +231,16 @@ export async function bench<T>(
 }> {
   const connection = anchor.getProvider().connection as Connection;
 
-  const signatures: string[] = [];
+  let bench: BenchSummary = {
+    name,
+    txs: [],
+    totalCU: 0,
+    totalTimeMs: 0,
+  };
+
+  const signatures: Signature[] = [];
   const timings = new Map<string, number>(); // signature -> time in ms (approx)
+  let id = 1;
 
   // save originals
   const web3 = await import("@solana/web3.js");
@@ -216,10 +252,39 @@ export async function bench<T>(
     opts?: any
   ) {
     const start = Date.now();
-    const sig = await origSendRawTransaction.call(this, raw, opts);
-    signatures.push(sig);
-    timings.set(sig, Date.now() - start);
-    return sig;
+    try {
+      const sig = await origSendRawTransaction.call(this, raw, opts);
+      const s: Signature = { id: id++, sig };
+      signatures.push(s);
+      timings.set(sig, Date.now() - start);
+      return sig;
+    } catch (err) {
+      // catch failed transaction simulation
+      const logs = await extractErrorLogs(err, connection);
+      if (logs) {
+        const ixs = parseLogsForIxs(err.logs);
+        let cu = 0;
+        ixs.forEach((ix) => {
+          cu += ix.cu;
+        });
+        const tx: BenchTx = {
+          id: id++,
+          sig: `${RED_BOLD}✗${RESET} Failed during simulation`,
+          status: "failed",
+          ixs,
+          cu,
+          ms: 0,
+          logs: err.logs,
+        };
+        bench.txs.push(tx);
+        bench.totalCU += cu;
+      } else {
+        console.warn(
+          `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for failed transaction #${id++}`
+        );
+      }
+      throw err;
+    }
   };
 
   // Run the user closure and capture result / errors
@@ -238,23 +303,13 @@ export async function bench<T>(
 
   // If closure threw — rethrow after we finish gathering logs
   // Now fetch transaction details and compute units
-  const txs: BenchTx[] = [];
-  let totalCU = 0;
-
-  let bench: BenchSummary = {
-    name,
-    txs: [],
-    totalCU: 0,
-    totalTimeMs: 0,
-  };
-
   for (const sig of signatures) {
     let txInfo: any = null;
     if (opts.waitForTx) {
       // try to fetch tx for some retries (some nodes are slow to index)
       for (let attempt = 0; attempt < opts.getTxRetries; attempt++) {
         try {
-          txInfo = await connection.getTransaction(sig, {
+          txInfo = await connection.getTransaction(sig.sig, {
             maxSupportedTransactionVersion: 1,
             commitment: "confirmed",
           });
@@ -266,13 +321,12 @@ export async function bench<T>(
         await new Promise((r) => setTimeout(r, opts.getTxDelayMs));
       }
     } else {
-      txInfo = await connection.getTransaction(sig, {
+      txInfo = await connection.getTransaction(sig.sig, {
         maxSupportedTransactionVersion: 1,
         commitment: "confirmed",
       });
     }
 
-    // console.log(txInfo);
     const logs: string[] | undefined = txInfo?.meta?.logMessages;
     // Newer runtime may set computeUnitsConsumed in meta; fallback to parsing logs
     let cu: number | undefined =
@@ -293,42 +347,31 @@ export async function bench<T>(
       ixs = parseLogsForIxs(logs);
     } else {
       console.warn(
-        `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for transaction ${sig} - could not parse instruction names and CU values`
+        `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for transaction #${sig.id} - could not parse instruction names and CU values`
       );
     }
 
-    if (cu) totalCU += cu;
+    if (cu) bench.totalCU += cu;
 
-    const tx: BenchTx = { sig, ixs, cu, ms: timings.get(sig), logs };
-    txs.push(tx);
+    const tx: BenchTx = {
+      id: sig.id,
+      sig: sig.sig,
+      status: "success",
+      ixs,
+      cu,
+      ms: timings.get(sig.sig),
+      logs,
+    };
+    bench.txs.push(tx);
   }
 
   const totalTimeMs = Date.now() - overallStart;
-  bench.totalCU = totalCU;
   bench.totalTimeMs = totalTimeMs;
-  bench.txs = txs;
-  // const summary = { name, items: txs, totalCU, totalTimeMs };
-
-  // console.log(
-  //   `[bench:${name}] total CU = ${totalCU}, time ms = ${totalTimeMs}`
-  // );
-  if (error) {
-    const logs = error.logs;
-    const ixs = parseLogsForIxs(logs);
-    // TODO calculate cu and timings
-    const tx: BenchTx = { sig: "Failed during simulation", ixs, cu: 0, ms: 0, logs };
-    bench.txs.push(tx);
-    // TODO increment cus and time
-  }
+  // transactions failed during simulation were pushed to the bench first so we need to sort the transactions by id
+  bench.txs.sort((a, b) => a.id - b.id);
   printBenchSummary(bench);
 
   if (error) {
-    // attach summary to error or log
-    console.warn(
-      `[bench:${name}] error occurred, returning summary so you can debug`,
-      bench
-    );
-    // console.log(error.logs);
     throw error;
   }
 
@@ -402,13 +445,17 @@ function parseLogsForIxs(logs: string[]): BenchIx[] {
 function printBenchSummary(summary: BenchSummary): void {
   console.log(`\n=== Benchmark Summary: ${summary.name} ===`);
   console.log(`Total Transactions: ${summary.txs.length}`);
-  console.log(`Total CU: ${summary.totalCU}`);
+  console.log(`Total CUs: ${summary.totalCU}`);
   console.log(`Total Time: ${summary.totalTimeMs.toFixed(2)} ms\n`);
 
-  summary.txs.forEach((tx, i) => {
-    console.log(`Tx #${i + 1} — ${tx.sig}`);
-    console.log(`  CU: ${tx.cu ?? "–"}`);
-    console.log(`  Time: ${tx.ms?.toFixed(2) ?? "–"} ms`);
+  summary.txs.forEach((tx) => {
+    // TODO: tx.status can be success but the result can be an error if skipPreflight is true
+    // and it is confusing to display a green checkmark in this case
+    // const status = tx.status === "success" ? `${GREEN_BOLD}✓${RESET}` : `${RED_BOLD}✗${RESET}`;
+    // console.log(`Tx #${tx.id + 1} — ${status} ${tx.sig}`);
+    console.log(`Tx #${tx.id} — ${tx.sig}`);
+    console.log(`  CUs: ${tx.cu ?? "–"}`);
+    console.log(`  Time: ${tx.ms && tx.ms > 0 ? tx.ms.toFixed(2) : "–"} ms`);
     console.log(`  Instructions: ${tx.ixs.length}`);
 
     // Flatten all nested instructions for table display
@@ -422,7 +469,7 @@ function printBenchSummary(summary: BenchSummary): void {
           const status = ix.status === "success" ? `✓` : `✗`;
           const instructionLabel = isRoot
             ? `${status} ${ix.ixName}`
-            : `${indent}${ix.ixName}`;
+            : `${indent}${status} ${ix.ixName}`;
 
           const programLabel = `${indent}${ix.program}`;
 
@@ -430,7 +477,7 @@ function printBenchSummary(summary: BenchSummary): void {
             Level: ix.nestedLevel,
             Instruction: instructionLabel,
             Program: programLabel,
-            CU: cuDisplay,
+            CUs: cuDisplay,
           };
         })
       );
@@ -466,9 +513,6 @@ async function airdrop(
 function table(input: any) {
   // this is a workaround for this table function not supporting colors as toString strips the ANSI sequences
   // therefore we just color the ✓ and ✗ characters manually
-  const GREEN_BOLD = "\x1b[1;32m";
-  const RED_BOLD = "\x1b[1;31m";
-  const RESET = "\x1b[0m";
   // @see https://stackoverflow.com/a/67859384
   const ts = new Transform({
     transform(chunk, enc, cb) {
@@ -495,4 +539,29 @@ function table(input: any) {
     if (i < rows.length - 1) result += "\n";
   }
   console.log(result);
+}
+
+export async function extractErrorLogs(
+  err: unknown,
+  connection: Connection
+): Promise<string[] | null> {
+  if (!(err instanceof SendTransactionError)) {
+    return null;
+  }
+
+  let logs: string[] | null = null;
+
+  if (typeof err.getLogs === "function") {
+    // Newer API (async)
+    try {
+      logs = await err.getLogs(connection);
+    } catch {
+      logs = err.logs ?? null;
+    }
+  } else {
+    // Legacy API (sync)
+    logs = err.logs ?? null;
+  }
+
+  return logs;
 }
