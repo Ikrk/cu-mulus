@@ -1,6 +1,6 @@
 - [x] check that `sendRawTransaction` is called everytime for different sending methods
 - [x] make sure to show a warning when tx logs are missing
-- [ ] make sure everything works correctly if error is returned
+- [x] make sure everything works correctly if error is returned
 - [x] show CPIs as nested instructions with their own CUs
 - [ ] display CU change compared to previous benchmark
 - [x] visually distinguish transactions/instructions/CPIs
@@ -10,7 +10,7 @@
 - [ ] pass optional arguments to benchmark function
   - [ ] throw an error if CUs increase more than a threshold
   - [ ] show nested instructions only if `--verbose` flag is provided
-  - [ ] add option to show instruction name and/or transaction signature
+  - [x] add option to show instruction name and/or transaction signature
   - [ ] allow displaying short signatures and pubkeys such as `Tokenke...Q5DA` (first 7 and last 4 characters)
 - [ ] Add possibility to replace program pubkeys by human readable name
 - [ ] Automatically replace common program pubkeys with human-readable names

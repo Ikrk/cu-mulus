@@ -1,221 +1,10 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { AnchorBencher } from "../target/types/anchor_bencher";
 import {
   Connection,
-  Keypair,
   SendTransactionError,
-  TransactionMessage,
-  VersionedTransaction,
-  sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import { Console } from "console";
-import { Transform } from "stream";
-
-const GREEN_BOLD = "\x1b[1;32m";
-const RED_BOLD = "\x1b[1;31m";
-const RESET = "\x1b[0m";
-
-describe("anchor-bencher", () => {
-  // Configure the client to use the local cluster.
-  anchor.setProvider(anchor.AnchorProvider.env());
-
-  const program = anchor.workspace.anchorBencher as Program<AnchorBencher>;
-  const user = Keypair.generate();
-
-  before(async () => {
-    await airdrop(anchor.getProvider().connection, user);
-  });
-
-  it("Anchor rpc send", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      await program.methods.initialize().rpc();
-    });
-  });
-
-  it("Solana sendTransaction (VersionedTransaction)", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
-      const { blockhash } = await connection.getLatestBlockhash();
-
-      let ix = await program.methods.initialize().instruction();
-      // Create the transaction message
-      const message = new TransactionMessage({
-        payerKey: anchor.getProvider().wallet.publicKey,
-        recentBlockhash: blockhash,
-        instructions: [ix],
-      }).compileToV0Message();
-      let tx = new VersionedTransaction(message);
-      tx.sign([anchor.getProvider().wallet.payer]);
-      let sig = await anchor.getProvider().connection.sendTransaction(tx);
-      await connection.confirmTransaction(
-        {
-          signature: sig,
-          blockhash,
-          lastValidBlockHeight: (
-            await connection.getLatestBlockhash()
-          ).lastValidBlockHeight,
-        },
-        "processed"
-      );
-    });
-  });
-
-  it("Missing logs - not waiting for confirmation", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
-      const { blockhash } = await connection.getLatestBlockhash();
-
-      let ix = await program.methods.initialize().instruction();
-      // Create the transaction message
-      const message = new TransactionMessage({
-        payerKey: anchor.getProvider().wallet.publicKey,
-        recentBlockhash: blockhash,
-        instructions: [ix],
-      }).compileToV0Message();
-      let tx = new VersionedTransaction(message);
-      tx.sign([anchor.getProvider().wallet.payer]);
-      let sig = await anchor.getProvider().connection.sendTransaction(tx);
-    });
-  });
-
-  it("Solana sendTransaction with multiple failed and successful instructions", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
-      const { blockhash } = await connection.getLatestBlockhash();
-
-      let ix1 = await program.methods.initialize().instruction();
-      let ix2 = await program.methods
-        .test()
-        .accounts({ user: user.publicKey })
-        .instruction();
-      let ix3 = await program.methods.testSimpleError().instruction();
-      // Create the transaction message
-      const message = new TransactionMessage({
-        payerKey: anchor.getProvider().wallet.publicKey,
-        recentBlockhash: blockhash,
-        instructions: [ix1, ix2, ix3],
-      }).compileToV0Message();
-      let tx = new VersionedTransaction(message);
-      tx.sign([anchor.getProvider().wallet.payer, user]);
-      try {
-        let sig = await anchor.getProvider().connection.sendTransaction(tx);
-        await connection.confirmTransaction(
-          {
-            signature: sig,
-            blockhash,
-            lastValidBlockHeight: (
-              await connection.getLatestBlockhash()
-            ).lastValidBlockHeight,
-          },
-          "confirmed"
-        );
-      } catch (error) {
-        // everything under control
-      }
-      // test that the failed transactions will have correct transaction id even if successful transactions are included
-      await program.methods.test().rpc();
-      try {
-        let mint = Keypair.generate();
-        await program.methods
-          .testWithError()
-          .accounts({ user: user.publicKey, mint: mint.publicKey })
-          .signers([user, mint])
-          .rpc({ skipPreflight: true });
-      } catch (error) {
-        // everything under control
-      }
-    });
-  });
-
-  it("Solana sendAndConfirmTransaction", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
-      const { blockhash } = await connection.getLatestBlockhash();
-
-      let tx = await program.methods.initialize().transaction();
-      let sig = await sendAndConfirmTransaction(connection, tx, [
-        anchor.getProvider().wallet.payer,
-      ]);
-    });
-  });
-
-  it("Test", async () => {
-    const { result, summary } = await bench("my test 2", async () => {
-      const tx = await program.methods
-        .test()
-        .accounts({ user: user.publicKey })
-        .signers([user])
-        .rpc();
-    });
-    // console.log("bench summary", summary);
-  });
-
-  it("Composed Tx", async () => {
-    const { result, summary } = await bench("composed tx bench", async () => {
-      let tx = await program.methods.initialize().rpc();
-      tx = await program.methods
-        .test()
-        .accounts({ user: user.publicKey })
-        .signers([user])
-        .rpc();
-    });
-  });
-
-  it("CPI", async () => {
-    const { result, summary } = await bench("cpi bench", async () => {
-      let mint = Keypair.generate();
-      await program.methods
-        .testWithCpi()
-        .accounts({ user: user.publicKey, mint: mint.publicKey })
-        .signers([user, mint])
-        .rpc();
-    });
-    // console.log(summary);
-  });
-
-  it.skip("Error", async () => {
-    const { result, summary } = await bench("cpi bench", async () => {
-      let mint = Keypair.generate();
-      await program.methods
-        .testWithError()
-        .accounts({ user: user.publicKey, mint: mint.publicKey })
-        .signers([user, mint])
-        .rpc({ skipPreflight: true });
-    });
-  });
-});
-
-type BenchTx = {
-  id: number;
-  sig: string;
-  status: string;
-  ixs: BenchIx[];
-  cu?: number;
-  ms?: number;
-  logs?: string[];
-};
-
-type BenchIx = {
-  ixName: string;
-  status: string;
-  program: string;
-  nestedLevel: number;
-  cpis: BenchIx[];
-  cu?: number;
-};
-
-type BenchSummary = {
-  name: string;
-  txs: BenchTx[];
-  totalCU: number;
-  totalTimeMs: number;
-};
-
-type Signature = {
-  id: number;
-  sig: string;
-};
+import { BenchIx, BenchSummary, BenchTx, Signature } from "./types";
+import { RED_BOLD, RESET, table } from "./utils";
 
 export async function bench<T>(
   name: string,
@@ -262,10 +51,10 @@ export async function bench<T>(
       // catch failed transaction simulation
       const logs = await extractErrorLogs(err, connection);
       if (logs) {
-        const ixs = parseLogsForIxs(err.logs);
+        const ixs = parseLogsForIxs(logs);
         let cu = 0;
         ixs.forEach((ix) => {
-          cu += ix.cu;
+          cu += ix.cu ?? 0;
         });
         const tx: BenchTx = {
           id: id++,
@@ -274,7 +63,7 @@ export async function bench<T>(
           ixs,
           cu,
           ms: 0,
-          logs: err.logs,
+          logs: logs,
         };
         bench.txs.push(tx);
         bench.totalCU += cu;
@@ -288,7 +77,7 @@ export async function bench<T>(
   };
 
   // Run the user closure and capture result / errors
-  let result: T;
+  let result: T | undefined;
   let error: any;
   const overallStart = Date.now();
   try {
@@ -485,9 +274,7 @@ function printBenchSummary(summary: BenchSummary): void {
   });
 }
 
-/**
- * Recursively flatten all nested instructions (CPIs)
- */
+//  Recursively flatten all nested instructions (CPIs)
 function flattenIxs(ixs: BenchIx[], level = 0): BenchIx[] {
   const result: BenchIx[] = [];
   for (const ix of ixs) {
@@ -500,48 +287,7 @@ function flattenIxs(ixs: BenchIx[], level = 0): BenchIx[] {
   return result;
 }
 
-async function airdrop(
-  connection: Connection,
-  user: Keypair,
-  amount: number = 100000000
-) {
-  const tx = await connection.requestAirdrop(user.publicKey, amount);
-  await connection.confirmTransaction(tx);
-}
-
-// replaces native console.table to remove the first (index) column
-function table(input: any) {
-  // this is a workaround for this table function not supporting colors as toString strips the ANSI sequences
-  // therefore we just color the ✓ and ✗ characters manually
-  // @see https://stackoverflow.com/a/67859384
-  const ts = new Transform({
-    transform(chunk, enc, cb) {
-      cb(null, chunk);
-    },
-  });
-  const logger = new Console({ stdout: ts });
-  logger.table(input);
-  const table = (ts.read() || "").toString();
-  let result = "";
-
-  const rows = table.split(/[\r\n]+/);
-  for (let i = 0; i < rows.length; i++) {
-    let row = rows[i];
-    let r = row.replace(/[^┬]*┬/, "┌");
-    r = r.replace(/^├─*┼/, "├");
-    r = r.replace(/│[^│]*/, "");
-    r = r.replace(/^└─*┴/, "└");
-    r = r.replace(/'/g, " ");
-    r = r.replace(/✓/, `${GREEN_BOLD}✓${RESET}`);
-    r = r.replace(/✗/, `${RED_BOLD}✗${RESET}`);
-    // Add newline only if not the last row
-    result += r;
-    if (i < rows.length - 1) result += "\n";
-  }
-  console.log(result);
-}
-
-export async function extractErrorLogs(
+async function extractErrorLogs(
   err: unknown,
   connection: Connection
 ): Promise<string[] | null> {
