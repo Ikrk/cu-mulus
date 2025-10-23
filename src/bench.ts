@@ -1,21 +1,22 @@
 import { Connection, SendTransactionError } from "@solana/web3.js";
 import { BenchIx, BenchSummary, BenchTx, Signature } from "./types";
 import { RED_BOLD, RESET, table } from "./utils";
+import { Cumulus, getCumulus } from "./cumulus";
 
 export async function bench<T>(
   name: string,
-  connection: Connection,
   fn: () => Promise<T>,
   opts = {
     waitForTx: true,
     getTxRetries: 10,
     getTxDelayMs: 200,
-  }
+  },
+  cumulusInstance: Cumulus = getCumulus()
 ): Promise<{
   result: T;
   summary: BenchSummary;
 }> {
-  let bench: BenchSummary = {
+  let benchSummary: BenchSummary = {
     name,
     txs: [],
     totalCU: 0,
@@ -26,6 +27,7 @@ export async function bench<T>(
   const timings = new Map<string, number>(); // signature -> time in ms (approx)
   let id = 1;
 
+  let connection = cumulusInstance.connection;
   // save originals
   const origSendRawTransaction = connection.sendRawTransaction.bind(connection);
   // patch Connection.prototype.sendRawTransaction
@@ -58,8 +60,8 @@ export async function bench<T>(
           ms: 0,
           logs: logs,
         };
-        bench.txs.push(tx);
-        bench.totalCU += cu;
+        benchSummary.txs.push(tx);
+        benchSummary.totalCU += cu;
       } else {
         console.warn(
           `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for failed transaction #${id++}`
@@ -132,7 +134,7 @@ export async function bench<T>(
       );
     }
 
-    if (cu) bench.totalCU += cu;
+    if (cu) benchSummary.totalCU += cu;
 
     const tx: BenchTx = {
       id: sig.id,
@@ -143,20 +145,21 @@ export async function bench<T>(
       ms: timings.get(sig.sig),
       logs,
     };
-    bench.txs.push(tx);
+    benchSummary.txs.push(tx);
   }
 
   const totalTimeMs = Date.now() - overallStart;
-  bench.totalTimeMs = totalTimeMs;
+  benchSummary.totalTimeMs = totalTimeMs;
   // transactions failed during simulation were pushed to the bench first so we need to sort the transactions by id
-  bench.txs.sort((a, b) => a.id - b.id);
-  printBenchSummary(bench);
+  benchSummary.txs.sort((a, b) => a.id - b.id);
+  printBenchSummary(benchSummary);
+  cumulusInstance.add(benchSummary);
 
   if (error) {
     throw error;
   }
 
-  return { result: result as T, summary: bench };
+  return { result: result as T, summary: benchSummary };
 }
 
 function parseLogsForIxs(logs: string[]): BenchIx[] {
