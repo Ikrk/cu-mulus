@@ -14,6 +14,8 @@
   - [ ] allow displaying short signatures and pubkeys such as `Tokenke...Q5DA` (first 7 and last 4 characters)
 - [ ] Add possibility to replace program pubkeys by human readable name
 - [ ] Automatically replace common program pubkeys with human-readable names
+- [x] Remove anchor dependency and replace is by `@solana/web3.js`
+- [x] Monkey patch user instance of connection to avoid version mismatch between the user project and cu-mulus
 
 - [x] show program pubkeys with CPI ix name
 

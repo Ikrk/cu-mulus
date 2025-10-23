@@ -1,13 +1,10 @@
-import * as anchor from "@coral-xyz/anchor";
-import {
-  Connection,
-  SendTransactionError,
-} from "@solana/web3.js";
+import { Connection, SendTransactionError } from "@solana/web3.js";
 import { BenchIx, BenchSummary, BenchTx, Signature } from "./types";
 import { RED_BOLD, RESET, table } from "./utils";
 
 export async function bench<T>(
   name: string,
+  connection: Connection,
   fn: () => Promise<T>,
   opts = {
     waitForTx: true,
@@ -18,8 +15,6 @@ export async function bench<T>(
   result: T;
   summary: BenchSummary;
 }> {
-  const connection = anchor.getProvider().connection as Connection;
-
   let bench: BenchSummary = {
     name,
     txs: [],
@@ -32,14 +27,9 @@ export async function bench<T>(
   let id = 1;
 
   // save originals
-  const web3 = await import("@solana/web3.js");
-  const origSendRawTransaction = (web3.Connection.prototype as any)
-    .sendRawTransaction;
+  const origSendRawTransaction = connection.sendRawTransaction.bind(connection);
   // patch Connection.prototype.sendRawTransaction
-  (web3.Connection.prototype as any).sendRawTransaction = async function (
-    raw: Buffer,
-    opts?: any
-  ) {
+  connection.sendRawTransaction = async function (raw: Buffer, opts?: any) {
     const start = Date.now();
     try {
       const sig = await origSendRawTransaction.call(this, raw, opts);
@@ -49,7 +39,10 @@ export async function bench<T>(
       return sig;
     } catch (err) {
       // catch failed transaction simulation
-      const logs = await extractErrorLogs(err, connection);
+      const logs = await extractErrorLogs(
+        err as SendTransactionError,
+        connection
+      );
       if (logs) {
         const ixs = parseLogsForIxs(logs);
         let cu = 0;
@@ -87,8 +80,7 @@ export async function bench<T>(
   }
 
   // restore patched methods (important)
-  (web3.Connection.prototype as any).sendRawTransaction =
-    origSendRawTransaction;
+  connection.sendRawTransaction = origSendRawTransaction;
 
   // If closure threw — rethrow after we finish gathering logs
   // Now fetch transaction details and compute units
@@ -288,26 +280,22 @@ function flattenIxs(ixs: BenchIx[], level = 0): BenchIx[] {
 }
 
 async function extractErrorLogs(
-  err: unknown,
+  err: SendTransactionError,
   connection: Connection
 ): Promise<string[] | null> {
-  if (!(err instanceof SendTransactionError)) {
-    return null;
-  }
+    let logs: string[] | null = null;
 
-  let logs: string[] | null = null;
-
-  if (typeof err.getLogs === "function") {
-    // Newer API (async)
-    try {
-      logs = await err.getLogs(connection);
-    } catch {
+    if (typeof err.getLogs === "function") {
+      // Newer API (async)
+      try {
+        logs = await err.getLogs(connection);
+      } catch {
+        logs = err.logs ?? null;
+      }
+    } else {
+      // Legacy API (sync)
       logs = err.logs ?? null;
     }
-  } else {
-    // Legacy API (sync)
-    logs = err.logs ?? null;
-  }
 
-  return logs;
+    return logs;
 }

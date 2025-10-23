@@ -10,10 +10,7 @@
   },
   "files": ["dist"],
   "dependencies": {
-    "@coral-xyz/anchor": "^0.31.1"
-  },
-  "peerDependencies": {
-    "@coral-xyz/anchor": "^0.31.1"
+    "@solana/web3.js": "^1.7.0"
   },
   "devDependencies": {
     "typescript": "^5.3.0"

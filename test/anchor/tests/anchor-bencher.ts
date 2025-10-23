@@ -13,6 +13,7 @@ import { bench } from "cu-mulus";
 describe("anchor-bencher", () => {
   // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env());
+  let connection = anchor.getProvider().connection;
 
   const program = anchor.workspace.anchorBencher as Program<AnchorBencher>;
   const user = Keypair.generate();
@@ -22,14 +23,13 @@ describe("anchor-bencher", () => {
   });
 
   it("Anchor rpc send", async () => {
-    const { result, summary } = await bench("my test", async () => {
+    const { result, summary } = await bench("my test", connection, async () => {
       await program.methods.initialize().rpc();
     });
   });
 
   it("Solana sendTransaction (VersionedTransaction)", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
+    const { result, summary } = await bench("my test", connection, async () => {
       const { blockhash } = await connection.getLatestBlockhash();
 
       let ix = await program.methods.initialize().instruction();
@@ -56,8 +56,7 @@ describe("anchor-bencher", () => {
   });
 
   it("Missing logs - not waiting for confirmation", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
+    const { result, summary } = await bench("my test", connection, async () => {
       const { blockhash } = await connection.getLatestBlockhash();
 
       let ix = await program.methods.initialize().instruction();
@@ -74,8 +73,7 @@ describe("anchor-bencher", () => {
   });
 
   it("Solana sendTransaction with multiple failed and successful instructions", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
+    const { result, summary } = await bench("my test", connection, async () => {
       const { blockhash } = await connection.getLatestBlockhash();
 
       let ix1 = await program.methods.initialize().instruction();
@@ -123,8 +121,7 @@ describe("anchor-bencher", () => {
   });
 
   it("Solana sendAndConfirmTransaction", async () => {
-    const { result, summary } = await bench("my test", async () => {
-      let connection = anchor.getProvider().connection;
+    const { result, summary } = await bench("my test", connection, async () => {
       const { blockhash } = await connection.getLatestBlockhash();
 
       let tx = await program.methods.initialize().transaction();
@@ -135,7 +132,7 @@ describe("anchor-bencher", () => {
   });
 
   it("Test", async () => {
-    const { result, summary } = await bench("my test 2", async () => {
+    const { result, summary } = await bench("my test 2", connection, async () => {
       const tx = await program.methods
         .test()
         .accounts({ user: user.publicKey })
@@ -146,7 +143,7 @@ describe("anchor-bencher", () => {
   });
 
   it("Composed Tx", async () => {
-    const { result, summary } = await bench("composed tx bench", async () => {
+    const { result, summary } = await bench("composed tx bench", connection, async () => {
       let tx = await program.methods.initialize().rpc();
       tx = await program.methods
         .test()
@@ -157,7 +154,7 @@ describe("anchor-bencher", () => {
   });
 
   it("CPI", async () => {
-    const { result, summary } = await bench("cpi bench", async () => {
+    const { result, summary } = await bench("cpi bench", connection, async () => {
       let mint = Keypair.generate();
       await program.methods
         .testWithCpi()
@@ -169,7 +166,7 @@ describe("anchor-bencher", () => {
   });
 
   it.skip("Error", async () => {
-    const { result, summary } = await bench("cpi bench", async () => {
+    const { result, summary } = await bench("cpi bench", connection, async () => {
       let mint = Keypair.generate();
       await program.methods
         .testWithError()
