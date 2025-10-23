@@ -22,6 +22,10 @@ describe("anchor-bencher", () => {
   before(async () => {
     await airdrop(anchor.getProvider().connection, user);
   });
+  after(() => {
+    // Save all benchmarks after the suite completes
+    getCumulus().saveToFile();
+  });
 
   it("Anchor rpc send", async () => {
     const { result, summary } = await bench("my test", async () => {
