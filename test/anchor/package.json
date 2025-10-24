@@ -6,16 +6,21 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
+    "@solana-program/compute-budget": "^0.10.0",
+    "@solana/compat": "^5.0.0",
+    "@solana/kit": "^5.0.0",
+    "@solana/rpc": "^5.0.0",
+    "@solana/rpc-transport": "^0.0.0-experimental.0",
     "cu-mulus": "file:../../"
   },
   "devDependencies": {
-    "chai": "^4.3.4",
-    "mocha": "^9.0.3",
-    "ts-mocha": "^10.0.0",
     "@types/bn.js": "^5.1.0",
     "@types/chai": "^4.3.0",
     "@types/mocha": "^9.0.0",
-    "typescript": "^5.7.3",
-    "prettier": "^2.6.2"
+    "chai": "^4.3.4",
+    "mocha": "^9.0.3",
+    "prettier": "^2.6.2",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^5.7.3"
   }
 }
