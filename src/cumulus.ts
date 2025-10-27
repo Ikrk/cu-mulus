@@ -27,7 +27,7 @@ export class Cumulus {
 
     const bench_json = JSON.stringify(this.results, null, 2);
     fs.writeFileSync(file, bench_json, "utf8");
-    console.log(`✅ Benchmark saved to: ${file}`);
+    console.log(`\n✅ Benchmark saved to: ${file}`);
 
     // also write/overwrite latest.json for quick access
     fs.writeFileSync(path.join(CUMULUS_DIR, "latest.json"), bench_json);

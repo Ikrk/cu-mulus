@@ -1,6 +1,6 @@
 import { Connection, SendTransactionError } from "@solana/web3.js";
 import { BenchIx, BenchSummary, BenchTx, Signature } from "./types";
-import { BLUE_BOLD, RED_BOLD, RESET, table } from "./utils";
+import { BLUE_BOLD, GREEN_BOLD, RED_BOLD, RESET, table } from "./utils";
 import { Cumulus, getCumulus } from "./cumulus";
 import crypto from "crypto";
 
@@ -251,36 +251,39 @@ function printBenchSummary(
   summary: BenchSummary,
   previousSummary?: BenchSummary,
 ): void {
-  console.log(`\n${BLUE_BOLD}🚀 Benchmark Summary:${RESET} ${summary.name}`);
+  console.log(`\n${BLUE_BOLD}☁️  CU-mulus Summary:${RESET} ${summary.name}`);
   console.log(`Total Transactions: ${summary.txs.length}`);
-  console.log(`Total CUs: ${summary.totalCU}`);
+  console.log(
+    `Total CUs: ${summary.totalCU} ${
+      previousSummary
+        ? "(change " +
+          stringifyAndFormatChange(summary.totalCU, previousSummary.totalCU) +
+          ")"
+        : ""
+    }`,
+  );
   console.log(`Total Time: ${summary.totalTimeMs.toFixed(2)} ms`);
-  // TODO add comparison color: red if change greater than 0, green if change less than 0
-  // TODO add comparison to the same line
   // TODO add comparison of each transaction and its individual instructions
-
-  if (previousSummary) {
-    const absoluteChange = summary.totalCU - previousSummary.totalCU;
-    const relativeChange =
-      previousSummary.totalCU !== 0
-        ? (absoluteChange / previousSummary.totalCU) * 100
-        : NaN;
-
-    console.log(
-      `Change from previous run: ${absoluteChange >= 0 ? "+" : ""}${absoluteChange} CUs ` +
-        `(${!isNaN(relativeChange) ? relativeChange.toFixed(2) + "%" : "N/A"})`,
-    );
-  }
 
   console.log(""); // extra line for spacing
 
-  summary.txs.forEach((tx) => {
+  summary.txs.forEach((tx, i) => {
+    const prevTx = previousSummary?.txs[i]; // undefined if no previous or shorter array
     // TODO: tx.status can be success but the result can be an error if skipPreflight is true
     // and it is confusing to display a green checkmark in this case
     // const status = tx.status === "success" ? `${GREEN_BOLD}✓${RESET}` : `${RED_BOLD}✗${RESET}`;
     // console.log(`Tx #${tx.id + 1} — ${status} ${tx.sig}`);
     console.log(`Tx #${tx.id} — ${tx.sig}`);
-    console.log(`  CUs: ${tx.cu ?? "–"}`);
+    console.log(
+      `  CUs: ${
+        tx.cu
+          ? tx.cu +
+            (prevTx?.cu
+              ? " (change " + stringifyAndFormatChange(tx.cu, prevTx.cu) + ")"
+              : "")
+          : "-"
+      }`,
+    );
     console.log(`  Time: ${tx.ms && tx.ms > 0 ? tx.ms.toFixed(2) : "–"} ms`);
     console.log(`  Instructions: ${tx.ixs.length}`);
 
@@ -309,6 +312,23 @@ function printBenchSummary(
       );
     }
   });
+}
+
+function stringifyAndFormatChange(current: number, previous: number): string {
+  const absoluteChange = current - previous;
+  const relativeChange =
+    previous !== 0 ? (absoluteChange / previous) * 100 : NaN;
+
+  const color =
+    absoluteChange < 0 ? GREEN_BOLD : absoluteChange > 0 ? RED_BOLD : "";
+
+  const sign = absoluteChange > 0 ? "+" : "";
+
+  const changeMessage =
+    `${color}${sign}${absoluteChange} CUs ` +
+    `(${!isNaN(relativeChange) ? relativeChange.toFixed(2) + "%" : "N/A"})${RESET}`;
+
+  return changeMessage;
 }
 
 //  Recursively flatten all nested instructions (CPIs)

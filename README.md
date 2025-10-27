@@ -5,7 +5,7 @@
 - [ ] display CU change compared to previous benchmark
 - [x] visually distinguish transactions/instructions/CPIs
 - [ ] enable benchmarking only if `--bench` flag is provided
-- [ ] save benchmark results to a file
+- [x] save benchmark results to a file
 - [ ] patch mocha's it and add it.bench for convenience
 - [ ] pass optional arguments to benchmark function
   - [ ] throw an error if CUs increase more than a threshold
@@ -16,7 +16,7 @@
 - [ ] Automatically replace common program pubkeys with human-readable names
 - [x] Remove anchor dependency and replace is by `@solana/web3.js`
 - [x] Monkey patch user instance of connection to avoid version mismatch between the user project and cu-mulus
-
+- [ ] Add possibility to visualize and compare results from CLI
 - [x] show program pubkeys with CPI ix name
 
 - [ ] add license and readme
