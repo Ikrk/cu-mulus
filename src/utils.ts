@@ -5,12 +5,11 @@ export const GREEN_BOLD = "\x1b[1;32m";
 export const RED_BOLD = "\x1b[1;31m";
 export const BLUE_BOLD = "\x1b[1;36m";
 export const RESET = "\x1b[0m";
+export const YELLOW = "\x1b[33m\x1b[1m";
 
 // replaces native console.table to remove the first (index) column
+// @see https://stackoverflow.com/a/67859384
 export function table(input: any) {
-  // this is a workaround for this table function not supporting colors as toString strips the ANSI sequences
-  // therefore we just color the ✓ and ✗ characters manually
-  // @see https://stackoverflow.com/a/67859384
   const ts = new Transform({
     transform(chunk, enc, cb) {
       cb(null, chunk);
@@ -29,10 +28,30 @@ export function table(input: any) {
     r = r.replace(/│[^│]*/, "");
     r = r.replace(/^└─*┴/, "└");
     r = r.replace(/'/g, " ");
+
+    // this is a workaround for this table function not supporting colors as toString strips the ANSI sequences
+    // therefore we just color the ✓ and ✗ characters manually and find the CU absolute and relative changes and color them accordingly
     r = r.replace(/✓/, `${GREEN_BOLD}✓${RESET}`);
     r = r.replace(/✗/, `${RED_BOLD}✗${RESET}`);
+
+    const regex = /([+-]\d+)\s*CUs\s*\/\s*([+-]?\d+(?:\.\d+)?)\s*%/;
+    const output = r.replace(
+      regex,
+      (_: string, cu: string, percent: string) => {
+        const cuNum = parseInt(cu);
+        const percentNum = parseFloat(percent);
+        const cuColor = cuNum > 0 ? RED_BOLD : cuNum < 0 ? GREEN_BOLD : "";
+        const percentColor =
+          percentNum > 0 ? RED_BOLD : percentNum < 0 ? GREEN_BOLD : "";
+        return (
+          `${cuColor}${cu}${RESET} CUs / ` +
+          `${percentColor}${percent}${RESET} %`
+        );
+      },
+    );
+
     // Add newline only if not the last row
-    result += r;
+    result += output;
     if (i < rows.length - 1) result += "\n";
   }
   console.log(result);

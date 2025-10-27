@@ -1,6 +1,6 @@
 import { Connection, SendTransactionError } from "@solana/web3.js";
 import { BenchIx, BenchSummary, BenchTx, Signature } from "./types";
-import { BLUE_BOLD, GREEN_BOLD, RED_BOLD, RESET, table } from "./utils";
+import { BLUE_BOLD, GREEN_BOLD, RED_BOLD, RESET, table, YELLOW } from "./utils";
 import { Cumulus, getCumulus } from "./cumulus";
 import crypto from "crypto";
 
@@ -66,7 +66,7 @@ export async function bench<T>(
         benchSummary.totalCU += cu;
       } else {
         console.warn(
-          `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for failed transaction #${id++}`,
+          `[cu-mulus:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for failed transaction #${id++}`,
         );
       }
       throw err;
@@ -132,7 +132,7 @@ export async function bench<T>(
       ixs = parseLogsForIxs(logs);
     } else {
       console.warn(
-        `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for transaction #${sig.id} - could not parse instruction names and CU values`,
+        `[cu-mulus:${name}] ${YELLOW}WARNING${RESET} no logs found for transaction #${sig.id} - could not parse instruction names and CU values`,
       );
     }
 
@@ -256,7 +256,7 @@ function printBenchSummary(
   console.log(
     `Total CUs: ${summary.totalCU} ${
       previousSummary
-        ? "(change " +
+        ? "(change: " +
           stringifyAndFormatChange(summary.totalCU, previousSummary.totalCU) +
           ")"
         : ""
@@ -279,7 +279,7 @@ function printBenchSummary(
         tx.cu
           ? tx.cu +
             (prevTx?.cu
-              ? " (change " + stringifyAndFormatChange(tx.cu, prevTx.cu) + ")"
+              ? " (change: " + stringifyAndFormatChange(tx.cu, prevTx.cu) + ")"
               : "")
           : "-"
       }`,
@@ -290,6 +290,7 @@ function printBenchSummary(
     // Flatten all nested instructions for table display
     const flattenedIxs = flattenIxs(tx.ixs);
     if (flattenedIxs.length > 0) {
+      let baseLevelIndex = 0;
       table(
         flattenedIxs.map((ix) => {
           const indent = " ".repeat(ix.nestedLevel * 2);
@@ -302,6 +303,28 @@ function printBenchSummary(
 
           const programLabel = `${indent}${ix.program}`;
 
+          // We want to show change column only if previousSummary is defined
+          if (previousSummary) {
+            let change = "-";
+            // We show change only if we are at the root level - when calculating the unique
+            // bench hash, instruction cpis are not taken into account. In other words a bench summary
+            // to be considered the same must have the same name and transactions with the same root-level
+            // instructions. CPI calls are not taken into account so we are not showing change for them.
+            if (isRoot && ix.cu) {
+              const prevIx = prevTx?.ixs[baseLevelIndex++];
+              change = prevIx?.cu
+                ? stringifyChange(ix.cu, prevIx.cu)
+                : "";
+            }
+            return {
+              Level: ix.nestedLevel,
+              Instruction: instructionLabel,
+              Program: programLabel,
+              CUs: cuDisplay,
+              change: change,
+            };
+          }
+          // Previous summary is undefined so we are not showing changes.
           return {
             Level: ix.nestedLevel,
             Instruction: instructionLabel,
@@ -325,8 +348,22 @@ function stringifyAndFormatChange(current: number, previous: number): string {
   const sign = absoluteChange > 0 ? "+" : "";
 
   const changeMessage =
-    `${color}${sign}${absoluteChange} CUs ` +
-    `(${!isNaN(relativeChange) ? relativeChange.toFixed(2) + "%" : "N/A"})${RESET}`;
+    `${color}${sign}${absoluteChange}${RESET} CUs ` +
+    `/ ${!isNaN(relativeChange) ? color + sign + relativeChange.toFixed(2) + RESET + " %" : "N/A"}${RESET}`;
+
+  return changeMessage;
+}
+
+function stringifyChange(current: number, previous: number): string {
+  const absoluteChange = current - previous;
+  const relativeChange =
+    previous !== 0 ? (absoluteChange / previous) * 100 : NaN;
+
+  const sign = absoluteChange > 0 ? "+" : "";
+
+  const changeMessage =
+    `${sign}${absoluteChange} CUs ` +
+    `/ ${!isNaN(relativeChange) ? sign + relativeChange.toFixed(2) + " %" : "N/A"}`;
 
   return changeMessage;
 }

@@ -2,7 +2,7 @@
 - [x] make sure to show a warning when tx logs are missing
 - [x] make sure everything works correctly if error is returned
 - [x] show CPIs as nested instructions with their own CUs
-- [ ] display CU change compared to previous benchmark
+- [x] display CU change compared to previous benchmark
 - [x] visually distinguish transactions/instructions/CPIs
 - [ ] enable benchmarking only if `--bench` flag is provided
 - [x] save benchmark results to a file

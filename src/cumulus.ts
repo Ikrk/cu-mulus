@@ -2,6 +2,7 @@ import { Connection } from "@solana/web3.js";
 import { BenchSummary } from "./types";
 import fs from "fs";
 import path from "path";
+import { BLUE_BOLD, RESET, YELLOW } from "./utils";
 
 const CUMULUS_DIR = path.join(process.cwd(), "cu-mulus", "results");
 
@@ -42,7 +43,7 @@ export class Cumulus {
   loadBenchSummaries(path: string): BenchSummary[] {
     try {
       if (!fs.existsSync(path)) {
-        console.warn(`Previous benchmark file not found: ${path}`);
+        console.info(`${BLUE_BOLD}INFO${RESET} Previous benchmark file not found: ${path}`);
         return [];
       }
 
@@ -69,7 +70,7 @@ export class Cumulus {
     );
     if (found.length > 1) {
       console.warn(
-        `Multiple ambiguous benchmarks found with name ${previousBench.name} and hash ${previousBench.hash}. Could not compare results.`,
+        `\n[cu-mulus:${previousBench.name}] ${YELLOW}WARNING${RESET} Multiple ambiguous benchmarks found with the same name and hash (${previousBench.hash}). Could not compare results.`,
       );
       return undefined;
     }
