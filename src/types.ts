@@ -20,6 +20,7 @@ export type BenchIx = {
 
 export type BenchSummary = {
   name: string;
+  hash: string;
   txs: BenchTx[];
   totalCU: number;
   totalTimeMs: number;

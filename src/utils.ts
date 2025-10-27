@@ -3,6 +3,7 @@ import { Transform } from "stream";
 
 export const GREEN_BOLD = "\x1b[1;32m";
 export const RED_BOLD = "\x1b[1;31m";
+export const BLUE_BOLD = "\x1b[1;36m";
 export const RESET = "\x1b[0m";
 
 // replaces native console.table to remove the first (index) column

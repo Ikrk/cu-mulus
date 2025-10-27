@@ -1,7 +1,8 @@
 import { Connection, SendTransactionError } from "@solana/web3.js";
 import { BenchIx, BenchSummary, BenchTx, Signature } from "./types";
-import { RED_BOLD, RESET, table } from "./utils";
+import { BLUE_BOLD, RED_BOLD, RESET, table } from "./utils";
 import { Cumulus, getCumulus } from "./cumulus";
+import crypto from "crypto";
 
 export async function bench<T>(
   name: string,
@@ -11,13 +12,14 @@ export async function bench<T>(
     getTxRetries: 10,
     getTxDelayMs: 200,
   },
-  cumulusInstance: Cumulus = getCumulus()
+  cumulusInstance: Cumulus = getCumulus(),
 ): Promise<{
   result: T;
   summary: BenchSummary;
 }> {
   let benchSummary: BenchSummary = {
     name,
+    hash: "",
     txs: [],
     totalCU: 0,
     totalTimeMs: 0,
@@ -43,7 +45,7 @@ export async function bench<T>(
       // catch failed transaction simulation
       const logs = await extractErrorLogs(
         err as SendTransactionError,
-        connection
+        connection,
       );
       if (logs) {
         const ixs = parseLogsForIxs(logs);
@@ -64,7 +66,7 @@ export async function bench<T>(
         benchSummary.totalCU += cu;
       } else {
         console.warn(
-          `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for failed transaction #${id++}`
+          `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for failed transaction #${id++}`,
         );
       }
       throw err;
@@ -130,7 +132,7 @@ export async function bench<T>(
       ixs = parseLogsForIxs(logs);
     } else {
       console.warn(
-        `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for transaction #${sig.id} - could not parse instruction names and CU values`
+        `[bench:${name}] \x1b[33m\x1b[1mWARNING:\x1b[0m no logs found for transaction #${sig.id} - could not parse instruction names and CU values`,
       );
     }
 
@@ -152,7 +154,12 @@ export async function bench<T>(
   benchSummary.totalTimeMs = totalTimeMs;
   // transactions failed during simulation were pushed to the bench first so we need to sort the transactions by id
   benchSummary.txs.sort((a, b) => a.id - b.id);
-  printBenchSummary(benchSummary);
+  benchSummary.hash = computeBenchHash(benchSummary);
+
+  // load previous results for comparison
+  const previousBenchSummary =
+    cumulusInstance.findPreviousBenchByHash(benchSummary);
+  printBenchSummary(benchSummary, previousBenchSummary);
   cumulusInstance.add(benchSummary);
 
   if (error) {
@@ -169,7 +176,7 @@ function parseLogsForIxs(logs: string[]): BenchIx[] {
   for (let i = 0; i < logs.length; i++) {
     // detect new program invocation
     const matchNewInvocation = logs[i].match(
-      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+invoke\b/
+      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+invoke\b/,
     );
     if (matchNewInvocation) {
       level++;
@@ -208,7 +215,7 @@ function parseLogsForIxs(logs: string[]): BenchIx[] {
     }
     // detect end of program invocation mame
     const matchInvocationEnd = logs[i].match(
-      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+(success|failed)\b/
+      /Program\s+([1-9A-HJ-NP-Za-km-z]{32,44})\s+(success|failed)\b/,
     );
     if (matchInvocationEnd) {
       let status = matchInvocationEnd[2];
@@ -226,11 +233,46 @@ function parseLogsForIxs(logs: string[]): BenchIx[] {
   return ixs[0] ?? [];
 }
 
-function printBenchSummary(summary: BenchSummary): void {
-  console.log(`\n=== Benchmark Summary: ${summary.name} ===`);
+function computeBenchHash(summary: BenchSummary): string {
+  const data = {
+    name: summary.name,
+    txs: summary.txs.map((tx) => ({
+      id: tx.id,
+      ixs: tx.ixs.map((ix) => ({
+        ixName: ix.ixName,
+      })),
+    })),
+  };
+  const json = JSON.stringify(data);
+  return crypto.createHash("sha256").update(json).digest("hex");
+}
+
+function printBenchSummary(
+  summary: BenchSummary,
+  previousSummary?: BenchSummary,
+): void {
+  console.log(`\n${BLUE_BOLD}🚀 Benchmark Summary:${RESET} ${summary.name}`);
   console.log(`Total Transactions: ${summary.txs.length}`);
   console.log(`Total CUs: ${summary.totalCU}`);
-  console.log(`Total Time: ${summary.totalTimeMs.toFixed(2)} ms\n`);
+  console.log(`Total Time: ${summary.totalTimeMs.toFixed(2)} ms`);
+  // TODO add comparison color: red if change greater than 0, green if change less than 0
+  // TODO add comparison to the same line
+  // TODO add comparison of each transaction and its individual instructions
+
+  if (previousSummary) {
+    const absoluteChange = summary.totalCU - previousSummary.totalCU;
+    const relativeChange =
+      previousSummary.totalCU !== 0
+        ? (absoluteChange / previousSummary.totalCU) * 100
+        : NaN;
+
+    console.log(
+      `Change from previous run: ${absoluteChange >= 0 ? "+" : ""}${absoluteChange} CUs ` +
+        `(${!isNaN(relativeChange) ? relativeChange.toFixed(2) + "%" : "N/A"})`,
+    );
+  }
+
+  console.log(""); // extra line for spacing
 
   summary.txs.forEach((tx) => {
     // TODO: tx.status can be success but the result can be an error if skipPreflight is true
@@ -263,7 +305,7 @@ function printBenchSummary(summary: BenchSummary): void {
             Program: programLabel,
             CUs: cuDisplay,
           };
-        })
+        }),
       );
     }
   });
@@ -284,21 +326,21 @@ function flattenIxs(ixs: BenchIx[], level = 0): BenchIx[] {
 
 async function extractErrorLogs(
   err: SendTransactionError,
-  connection: Connection
+  connection: Connection,
 ): Promise<string[] | null> {
-    let logs: string[] | null = null;
+  let logs: string[] | null = null;
 
-    if (typeof err.getLogs === "function") {
-      // Newer API (async)
-      try {
-        logs = await err.getLogs(connection);
-      } catch {
-        logs = err.logs ?? null;
-      }
-    } else {
-      // Legacy API (sync)
+  if (typeof err.getLogs === "function") {
+    // Newer API (async)
+    try {
+      logs = await err.getLogs(connection);
+    } catch {
       logs = err.logs ?? null;
     }
+  } else {
+    // Legacy API (sync)
+    logs = err.logs ?? null;
+  }
 
-    return logs;
+  return logs;
 }
