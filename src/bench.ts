@@ -321,7 +321,7 @@ function printBenchSummary(
               Instruction: instructionLabel,
               Program: programLabel,
               CUs: cuDisplay,
-              change: change,
+              Change: change,
             };
           }
           // Previous summary is undefined so we are not showing changes.
