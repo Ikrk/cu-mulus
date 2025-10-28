@@ -5,9 +5,10 @@ import { Connection, Keypair } from "@solana/web3.js";
 import { bench, getCumulus, initCumulus } from "cu-mulus";
 import { fromLegacyTransactionInstruction } from "@solana/compat";
 import {
-    appendTransactionMessageInstruction,
+  appendTransactionMessageInstruction,
   appendTransactionMessageInstructions,
   assertIsSendableTransaction,
+  assertIsTransactionMessageWithBlockhashLifetime,
   assertIsTransactionWithinSizeLimit,
   BaseTransactionMessage,
   compileTransaction,
@@ -26,7 +27,10 @@ import {
   signTransactionMessageWithSigners,
   TransactionMessageWithFeePayer,
 } from "@solana/kit";
-import { estimateComputeUnitLimitFactory, getSetComputeUnitLimitInstruction } from "@solana-program/compute-budget";
+import {
+  estimateComputeUnitLimitFactory,
+  getSetComputeUnitLimitInstruction,
+} from "@solana-program/compute-budget";
 
 describe("kit tests", () => {
   // Configure the client to use the local cluster.
@@ -68,22 +72,26 @@ describe("kit tests", () => {
       createTransactionMessage({ version: 0 }),
       (tx) => setTransactionMessageFeePayerSigner(payer, tx),
       (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
-      (tx) => appendTransactionMessageInstructions([instruction], tx),
+      (tx) => appendTransactionMessageInstructions([instruction], tx)
       // (tx) => estimateAndSetComputeUnitLimitFactory(tx)
     );
 
     // const transaction = compileTransaction(transactionMessage);
 
-    const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
+    const signedTransaction = await signTransactionMessageWithSigners(
+      transactionMessage
+    );
     assertIsSendableTransaction(signedTransaction);
 
     signedTransaction satisfies SendableTransaction;
- // assertIsTransactionWithinSizeLimit(signedTransaction);
+    // assertIsTransactionWithinSizeLimit(signedTransaction);
+    // assertIsTransactionMessageWithBlockhashLifetime(signedTransaction);
 
     const transactionSignature = getSignatureFromTransaction(signedTransaction);
     await sendAndConfirmTransaction(signedTransaction, {
       commitment: "confirmed",
     });
+
     // tx.sign([anchor.getProvider().wallet.payer]);
     // let sig = await anchor.getProvider().connection.sendTransaction(tx, {skipPreflight: true});
     // await connection.confirmTransaction(
@@ -263,16 +271,20 @@ async function airdrop(
   await connection.confirmTransaction(tx);
 }
 function estimateAndSetComputeUnitLimitFactory(
-    ...params: Parameters<typeof estimateComputeUnitLimitFactory>
+  ...params: Parameters<typeof estimateComputeUnitLimitFactory>
 ) {
-    const estimateComputeUnitLimit = estimateComputeUnitLimitFactory(...params);
-    return async <T extends BaseTransactionMessage & TransactionMessageWithFeePayer>(
-        transactionMessage: T,
-    ) => {
-        const computeUnitsEstimate = await estimateComputeUnitLimit(transactionMessage);
-        return appendTransactionMessageInstruction(
-            getSetComputeUnitLimitInstruction({ units: computeUnitsEstimate }),
-            transactionMessage,
-        );
-    };
+  const estimateComputeUnitLimit = estimateComputeUnitLimitFactory(...params);
+  return async <
+    T extends BaseTransactionMessage & TransactionMessageWithFeePayer
+  >(
+    transactionMessage: T
+  ) => {
+    const computeUnitsEstimate = await estimateComputeUnitLimit(
+      transactionMessage
+    );
+    return appendTransactionMessageInstruction(
+      getSetComputeUnitLimitInstruction({ units: computeUnitsEstimate }),
+      transactionMessage
+    );
+  };
 }
