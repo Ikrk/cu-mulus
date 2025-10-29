@@ -13,7 +13,7 @@ CU-mulus is a lightweight and easy-to-set-up TypeScript benchmarking library tha
 - 💾 Save benchmark results to a file
 - 🎨 Color-coded terminal output for quick performance insights
 
-
+-----------
 
 ![CU-mulus Summary Output](cu-mulus.png)
 
@@ -34,7 +34,7 @@ yarn add @ikrk/cu-mulus
 ```typescript
 import * as anchor from "@coral-xyz/anchor";
 import { ExampleProgram } from "../target/types/example_program";
-import { bench, getCumulus, initCumulus } from "cu-mulus";
+import { bench, getCumulus, initCumulus } from "@ikrk/cu-mulus";
 
 describe("anchor-bencher", () => {
   anchor.setProvider(anchor.AnchorProvider.env());
