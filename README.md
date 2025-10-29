@@ -21,12 +21,12 @@ CU-mulus is a lightweight and easy-to-set-up TypeScript benchmarking library tha
 
 ### Using npm
 ```console
-npm install cu-mulus
+npm install @ikrk/cu-mulus
 ```
 
 ### Using yarn
 ```console
-yarn add cu-mulus
+yarn add @ikrk/cu-mulus
 ```
 
 ## Usage

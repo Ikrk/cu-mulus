@@ -1,5 +1,5 @@
 {
-  "name": "cu-mulus",
+  "name": "@ikrk/cu-mulus",
   "version": "0.1.0",
   "description": "Benchmarking and profiling utilities for Solana Anchor programs",
   "main": "dist/index.js",
