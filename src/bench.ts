@@ -1,5 +1,5 @@
 import { Connection, SendTransactionError } from "@solana/web3.js";
-import { BenchIx, BenchSummary, BenchTx, Signature } from "./types";
+import { BenchIx, BenchOptions, BenchSummary, BenchTx, Signature } from "./types";
 import { BLUE_BOLD, GREEN_BOLD, RED_BOLD, RESET, table, YELLOW } from "./utils";
 import { Cumulus, getCumulus } from "./cumulus";
 import crypto from "crypto";
@@ -7,16 +7,22 @@ import crypto from "crypto";
 export async function bench<T>(
   name: string,
   fn: () => Promise<T>,
-  opts = {
-    waitForTx: true,
-    getTxRetries: 10,
-    getTxDelayMs: 200,
-  },
+  opts: Partial<BenchOptions> = {},
   cumulusInstance: Cumulus = getCumulus(),
 ): Promise<{
   result: T;
   summary: BenchSummary;
 }> {
+  const defaultOpts: BenchOptions = {
+      waitForTx: true,
+      getTxRetries: 10,
+      getTxDelayMs: 200,
+      errorOnBenchCUsAbsIncrease: 0,
+      errorOnBenchCUsRelIncrease: 0,
+    };
+
+  const finalOpts: BenchOptions = { ...defaultOpts, ...opts };
+
   let benchSummary: BenchSummary = {
     name,
     hash: "",
@@ -90,9 +96,9 @@ export async function bench<T>(
   // Now fetch transaction details and compute units
   for (const sig of signatures) {
     let txInfo: any = null;
-    if (opts.waitForTx) {
+    if (finalOpts.waitForTx) {
       // try to fetch tx for some retries (some nodes are slow to index)
-      for (let attempt = 0; attempt < opts.getTxRetries; attempt++) {
+      for (let attempt = 0; attempt < finalOpts.getTxRetries; attempt++) {
         try {
           txInfo = await connection.getTransaction(sig.sig, {
             maxSupportedTransactionVersion: 1,
@@ -103,7 +109,7 @@ export async function bench<T>(
         }
         if (txInfo && txInfo.meta) break;
         // wait then retry
-        await new Promise((r) => setTimeout(r, opts.getTxDelayMs));
+        await new Promise((r) => setTimeout(r, finalOpts.getTxDelayMs));
       }
     } else {
       txInfo = await connection.getTransaction(sig.sig, {
@@ -159,11 +165,18 @@ export async function bench<T>(
   // load previous results for comparison
   const previousBenchSummary =
     cumulusInstance.findPreviousBenchByHash(benchSummary);
-  printBenchSummary(benchSummary, previousBenchSummary);
+  const errorOnCUIncrease = {
+    benchAbs: finalOpts.errorOnBenchCUsAbsIncrease,
+    benchRel: finalOpts.errorOnBenchCUsRelIncrease,
+  };
+  const errorMsg = printBenchSummary(benchSummary, previousBenchSummary, errorOnCUIncrease);
   cumulusInstance.add(benchSummary);
 
   if (error) {
     throw error;
+  }
+  if (errorMsg) {
+    throw new Error(errorMsg);
   }
 
   return { result: result as T, summary: benchSummary };
@@ -250,21 +263,36 @@ function computeBenchHash(summary: BenchSummary): string {
 function printBenchSummary(
   summary: BenchSummary,
   previousSummary?: BenchSummary,
-): void {
+  errorOnCUIncrease = {
+    benchAbs: 0,
+    benchRel: 0,
+  }
+): string {
+  let errorMsg = "";
   console.log(`\n${BLUE_BOLD}☁️  CU-mulus Summary:${RESET} ${summary.name}`);
   console.log(`Total Transactions: ${summary.txs.length}`);
-  console.log(
-    `Total CUs: ${summary.totalCU} ${
-      previousSummary
-        ? "(change: " +
-          stringifyAndFormatChange(summary.totalCU, previousSummary.totalCU) +
-          ")"
-        : ""
-    }`,
-  );
+  if (previousSummary) {
+    const [changeMsg, absChange, relChange] = stringifyAndFormatChange(
+      summary.totalCU,
+      previousSummary.totalCU,
+    );
+    console.log(`Total CUs: ${summary.totalCU} (change: ${changeMsg})`);
+    if (
+      errorOnCUIncrease.benchAbs > 0 &&
+      absChange >= errorOnCUIncrease.benchAbs
+    ) {
+      errorMsg += `Total absolute bench CUs increased by ${absChange} CUs, which is more than the allowed ${errorOnCUIncrease.benchAbs} CUs.\n`;
+    }
+    if (
+      errorOnCUIncrease.benchRel > 0 &&
+      relChange >= errorOnCUIncrease.benchRel
+    ) {
+      errorMsg += `Total relative bench CUs increased by ${relChange.toFixed(2)} percent, which is more than the allowed ${errorOnCUIncrease.benchRel} percent.\n`;
+    }
+  } else {
+    console.log(`Total CUs: ${summary.totalCU}`);
+  }
   console.log(`Total Time: ${summary.totalTimeMs.toFixed(2)} ms`);
-  // TODO add comparison of each transaction and its individual instructions
-
   console.log(""); // extra line for spacing
 
   summary.txs.forEach((tx, i) => {
@@ -335,9 +363,10 @@ function printBenchSummary(
       );
     }
   });
+  return errorMsg;
 }
 
-function stringifyAndFormatChange(current: number, previous: number): string {
+function stringifyAndFormatChange(current: number, previous: number): [string, number, number] {
   const absoluteChange = current - previous;
   const relativeChange =
     previous !== 0 ? (absoluteChange / previous) * 100 : NaN;
@@ -351,7 +380,7 @@ function stringifyAndFormatChange(current: number, previous: number): string {
     `${color}${sign}${absoluteChange}${RESET} CUs ` +
     `/ ${!isNaN(relativeChange) ? color + sign + relativeChange.toFixed(2) + RESET + " %" : "N/A"}${RESET}`;
 
-  return changeMessage;
+  return [changeMessage, absoluteChange, relativeChange];
 }
 
 function stringifyChange(current: number, previous: number): string {

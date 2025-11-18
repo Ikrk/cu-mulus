@@ -30,3 +30,11 @@ export type Signature = {
   id: number;
   sig: string;
 };
+
+export type BenchOptions = {
+  waitForTx: boolean;
+  getTxRetries: number;
+  getTxDelayMs: number;
+  errorOnBenchCUsAbsIncrease: number;
+  errorOnBenchCUsRelIncrease: number;
+};
