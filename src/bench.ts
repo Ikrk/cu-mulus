@@ -1,5 +1,11 @@
 import { Connection, SendTransactionError } from "@solana/web3.js";
-import { BenchIx, BenchOptions, BenchSummary, BenchTx, Signature } from "./types";
+import {
+  BenchIx,
+  BenchOptions,
+  BenchSummary,
+  BenchTx,
+  Signature,
+} from "./types";
 import { BLUE_BOLD, GREEN_BOLD, RED_BOLD, RESET, table, YELLOW } from "./utils";
 import { Cumulus, getCumulus } from "./cumulus";
 import crypto from "crypto";
@@ -14,12 +20,14 @@ export async function bench<T>(
   summary: BenchSummary;
 }> {
   const defaultOpts: BenchOptions = {
-      waitForTx: true,
-      getTxRetries: 10,
-      getTxDelayMs: 200,
-      errorOnBenchCUsAbsIncrease: 0,
-      errorOnBenchCUsRelIncrease: 0,
-    };
+    waitForTx: true,
+    getTxRetries: 10,
+    getTxDelayMs: 200,
+    errorOnBenchCUsAbsIncrease: 0,
+    errorOnBenchCUsRelIncrease: 0,
+    errorOnTxCUsAbsIncrease: 0,
+    errorOnTxCUsRelIncrease: 0,
+  };
 
   const finalOpts: BenchOptions = { ...defaultOpts, ...opts };
 
@@ -168,8 +176,14 @@ export async function bench<T>(
   const errorOnCUIncrease = {
     benchAbs: finalOpts.errorOnBenchCUsAbsIncrease,
     benchRel: finalOpts.errorOnBenchCUsRelIncrease,
+    txAbs: finalOpts.errorOnTxCUsAbsIncrease,
+    txRel: finalOpts.errorOnTxCUsRelIncrease,
   };
-  const errorMsg = printBenchSummary(benchSummary, previousBenchSummary, errorOnCUIncrease);
+  const errorMsg = printBenchSummary(
+    benchSummary,
+    previousBenchSummary,
+    errorOnCUIncrease,
+  );
   cumulusInstance.add(benchSummary);
 
   if (error) {
@@ -266,7 +280,9 @@ function printBenchSummary(
   errorOnCUIncrease = {
     benchAbs: 0,
     benchRel: 0,
-  }
+    txAbs: 0,
+    txRel: 0,
+  },
 ): string {
   let errorMsg = "";
   console.log(`\n${BLUE_BOLD}☁️  CU-mulus Summary:${RESET} ${summary.name}`);
@@ -302,16 +318,29 @@ function printBenchSummary(
     // const status = tx.status === "success" ? `${GREEN_BOLD}✓${RESET}` : `${RED_BOLD}✗${RESET}`;
     // console.log(`Tx #${tx.id + 1} — ${status} ${tx.sig}`);
     console.log(`Tx #${tx.id} — ${tx.sig}`);
-    console.log(
-      `  CUs: ${
-        tx.cu
-          ? tx.cu +
-            (prevTx?.cu
-              ? " (change: " + stringifyAndFormatChange(tx.cu, prevTx.cu) + ")"
-              : "")
-          : "-"
-      }`,
-    );
+    if (prevTx?.cu && tx.cu) {
+      const [changeMsg, absChange, relChange] = stringifyAndFormatChange(
+        tx.cu,
+        prevTx.cu,
+      );
+      console.log(
+        `  CUs: ${tx.cu ? tx.cu + " (change: " + changeMsg + ")" : "-"}`,
+      );
+      if (
+        errorOnCUIncrease.txAbs > 0 &&
+        absChange >= errorOnCUIncrease.txAbs
+      ) {
+        errorMsg += `Total absolute tx CUs increased by ${absChange} CUs, which is more than the allowed ${errorOnCUIncrease.txAbs} CUs.\n`;
+      }
+      if (
+        errorOnCUIncrease.txRel > 0 &&
+        relChange >= errorOnCUIncrease.txRel
+      ) {
+        errorMsg += `Total relative tx CUs increased by ${relChange.toFixed(2)} percent, which is more than the allowed ${errorOnCUIncrease.txRel} percent.\n`;
+      }
+    } else {
+      console.log(`  CUs: ${tx.cu ? tx.cu : "-"}`);
+    }
     console.log(`  Time: ${tx.ms && tx.ms > 0 ? tx.ms.toFixed(2) : "–"} ms`);
     console.log(`  Instructions: ${tx.ixs.length}`);
 
@@ -340,9 +369,7 @@ function printBenchSummary(
             // instructions. CPI calls are not taken into account so we are not showing change for them.
             if (isRoot && ix.cu) {
               const prevIx = prevTx?.ixs[baseLevelIndex++];
-              change = prevIx?.cu
-                ? stringifyChange(ix.cu, prevIx.cu)
-                : "";
+              change = prevIx?.cu ? stringifyChange(ix.cu, prevIx.cu) : "";
             }
             return {
               Level: ix.nestedLevel,
@@ -366,7 +393,10 @@ function printBenchSummary(
   return errorMsg;
 }
 
-function stringifyAndFormatChange(current: number, previous: number): [string, number, number] {
+function stringifyAndFormatChange(
+  current: number,
+  previous: number,
+): [string, number, number] {
   const absoluteChange = current - previous;
   const relativeChange =
     previous !== 0 ? (absoluteChange / previous) * 100 : NaN;

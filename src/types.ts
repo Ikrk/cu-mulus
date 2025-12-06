@@ -37,4 +37,6 @@ export type BenchOptions = {
   getTxDelayMs: number;
   errorOnBenchCUsAbsIncrease: number;
   errorOnBenchCUsRelIncrease: number;
+  errorOnTxCUsAbsIncrease: number;
+  errorOnTxCUsRelIncrease: number;
 };
