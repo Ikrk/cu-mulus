@@ -39,4 +39,6 @@ export type BenchOptions = {
   errorOnBenchCUsRelIncrease: number;
   errorOnTxCUsAbsIncrease: number;
   errorOnTxCUsRelIncrease: number;
+  errorOnIxCUsAbsIncrease: number;
+  errorOnIxCUsRelIncrease: number;
 };

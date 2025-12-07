@@ -27,6 +27,8 @@ export async function bench<T>(
     errorOnBenchCUsRelIncrease: 0,
     errorOnTxCUsAbsIncrease: 0,
     errorOnTxCUsRelIncrease: 0,
+    errorOnIxCUsAbsIncrease: 0,
+    errorOnIxCUsRelIncrease: 0,
   };
 
   const finalOpts: BenchOptions = { ...defaultOpts, ...opts };
@@ -178,6 +180,8 @@ export async function bench<T>(
     benchRel: finalOpts.errorOnBenchCUsRelIncrease,
     txAbs: finalOpts.errorOnTxCUsAbsIncrease,
     txRel: finalOpts.errorOnTxCUsRelIncrease,
+    ixAbs: finalOpts.errorOnIxCUsAbsIncrease,
+    ixRel: finalOpts.errorOnIxCUsRelIncrease,
   };
   const errorMsg = printBenchSummary(
     benchSummary,
@@ -282,6 +286,8 @@ function printBenchSummary(
     benchRel: 0,
     txAbs: 0,
     txRel: 0,
+    ixAbs: 0,
+    ixRel: 0,
   },
 ): string {
   let errorMsg = "";
@@ -348,6 +354,8 @@ function printBenchSummary(
     const flattenedIxs = flattenIxs(tx.ixs);
     if (flattenedIxs.length > 0) {
       let baseLevelIndex = 0;
+      let maxIxAbsChange = 0;
+      let maxIxRelChange = 0;
       table(
         flattenedIxs.map((ix) => {
           const indent = " ".repeat(ix.nestedLevel * 2);
@@ -369,7 +377,12 @@ function printBenchSummary(
             // instructions. CPI calls are not taken into account so we are not showing change for them.
             if (isRoot && ix.cu) {
               const prevIx = prevTx?.ixs[baseLevelIndex++];
-              change = prevIx?.cu ? stringifyChange(ix.cu, prevIx.cu) : "";
+             if (prevIx?.cu) {
+               const [changeMsg, absChange, relChange] = stringifyChange(ix.cu, prevIx.cu);
+               maxIxAbsChange = Math.max(maxIxAbsChange, absChange);
+               maxIxRelChange = Math.max(maxIxRelChange, relChange);
+               change = changeMsg;
+             }
             }
             return {
               Level: ix.nestedLevel,
@@ -388,6 +401,18 @@ function printBenchSummary(
           };
         }),
       );
+      if (
+        errorOnCUIncrease.ixAbs > 0 &&
+        maxIxAbsChange >= errorOnCUIncrease.ixAbs
+      ) {
+        errorMsg += `Maximum absolute ix CUs increased by ${maxIxAbsChange} CUs, which is more than the allowed ${errorOnCUIncrease.ixAbs} CUs.\n`;
+      }
+      if (
+        errorOnCUIncrease.ixRel > 0 &&
+        maxIxRelChange >= errorOnCUIncrease.ixRel
+      ) {
+        errorMsg += `Maximum relative ix CUs increased by ${maxIxRelChange.toFixed(2)} percent, which is more than the allowed ${errorOnCUIncrease.ixRel} percent.\n`;
+      }
     }
   });
   return errorMsg;
@@ -413,7 +438,7 @@ function stringifyAndFormatChange(
   return [changeMessage, absoluteChange, relativeChange];
 }
 
-function stringifyChange(current: number, previous: number): string {
+function stringifyChange(current: number, previous: number): [string, number, number] {
   const absoluteChange = current - previous;
   const relativeChange =
     previous !== 0 ? (absoluteChange / previous) * 100 : NaN;
@@ -424,7 +449,7 @@ function stringifyChange(current: number, previous: number): string {
     `${sign}${absoluteChange} CUs ` +
     `/ ${!isNaN(relativeChange) ? sign + relativeChange.toFixed(2) + " %" : "N/A"}`;
 
-  return changeMessage;
+  return [changeMessage, absoluteChange, relativeChange];
 }
 
 //  Recursively flatten all nested instructions (CPIs)
