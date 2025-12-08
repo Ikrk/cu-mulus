@@ -58,3 +58,30 @@ describe("anchor-bencher", () => {
   });
 });
 ```
+
+## Configuration
+
+The `bench` function allows users to pass an optional `BenchOptions` object to customize the behavior of the benchmarking.
+
+```typescript
+const defaultOpts: BenchOptions = {
+  // --- Transaction Confirmation ---
+  waitForTx: true, // Wait for transaction confirmation.
+  getTxRetries: 10, // Max attempts to fetch transaction logs.
+  getTxDelayMs: 200, // Delay (ms) between fetch attempts.
+
+  // --- CU Increase Error Thresholds (Error if increase >= value; 0 disables check) ---
+
+  // Total Benchmark CUs (Absolute / Relative %)
+  errorOnBenchCUsAbsIncrease: 0,
+  errorOnBenchCUsRelIncrease: 0,
+
+  // Total Transaction CUs (Absolute / Relative %)
+  errorOnTxCUsAbsIncrease: 0,
+  errorOnTxCUsRelIncrease: 0,
+
+  // Max Instruction CUs (Absolute / Relative %)
+  errorOnIxCUsAbsIncrease: 0,
+  errorOnIxCUsRelIncrease: 0,
+};
+```
