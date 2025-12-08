@@ -1,6 +1,6 @@
 {
   "name": "@ikrk/cu-mulus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Benchmarking and profiling utilities for Solana Anchor programs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -8,7 +8,9 @@
     "build": "tsc",
     "test": "cd test/anchor && anchor test"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@solana/web3.js": "^1.7.0"
   },
