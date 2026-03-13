@@ -1,290 +1,92 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { AnchorBencher } from "../target/types/anchor_bencher";
-import { Connection, Keypair } from "@solana/web3.js";
-import { bench, getCumulus, initCumulus } from "cu-mulus";
+import { Address, address, appendTransactionMessageInstruction, appendTransactionMessageInstructions, assertIsSendableTransaction, assertIsTransactionWithBlockhashLifetime, Blockhash, createKeyPairSignerFromBytes, createSolanaRpc, createSolanaRpcSubscriptions, createTransactionMessage, generateKeyPairSigner, isSolanaError, KeyPairSigner, Lamports, lamports, pipe, sendAndConfirmTransactionFactory, setTransactionMessageFeePayer, setTransactionMessageFeePayerSigner, setTransactionMessageLifetimeUsingBlockhash, signTransactionMessageWithSigners, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE } from "@solana/kit";
+import { getSystemErrorMessage, getTransferSolInstruction, isSystemError } from "@solana-program/system";
+import { createRecentSignatureConfirmationPromiseFactory } from "@solana/transaction-confirmation";
 import { fromLegacyTransactionInstruction } from "@solana/compat";
-import {
-  appendTransactionMessageInstruction,
-  appendTransactionMessageInstructions,
-  assertIsSendableTransaction,
-  assertIsTransactionMessageWithBlockhashLifetime,
-  assertIsTransactionWithinSizeLimit,
-  BaseTransactionMessage,
-  compileTransaction,
-  createSolanaRpc,
-  createSolanaRpcSubscriptions,
-  createTransactionMessage,
-  generateKeyPair,
-  generateKeyPairSigner,
-  getSignatureFromTransaction,
-  pipe,
-  SendableTransaction,
-  sendAndConfirmTransactionFactory,
-  setTransactionMessageFeePayerSigner,
-  setTransactionMessageLifetimeUsingBlockhash,
-  signTransaction,
-  signTransactionMessageWithSigners,
-  TransactionMessageWithFeePayer,
-} from "@solana/kit";
-import {
-  estimateComputeUnitLimitFactory,
-  getSetComputeUnitLimitInstruction,
-} from "@solana-program/compute-budget";
+
 
 describe("kit tests", () => {
-  // Configure the client to use the local cluster.
-  // anchor.setProvider(anchor.AnchorProvider.env());
-  // let connection = anchor.getProvider().connection;
-  // initCumulus(connection); // ✅ initializes internal singleton
-
-  const rpc = createSolanaRpc("http://localhost:8899");
-  const rpcSubscriptions = createSolanaRpcSubscriptions("ws://localhost:8900");
-  const sendAndConfirmTransaction = sendAndConfirmTransactionFactory({
-    rpc,
-    rpcSubscriptions,
-  });
   const program = anchor.workspace.anchorBencher as Program<AnchorBencher>;
-  const user = Keypair.generate();
+  anchor.setProvider(anchor.AnchorProvider.env());
 
-  before(async () => {
-    await airdrop(anchor.getProvider().connection, user);
+  let SOURCE_ACCOUNT_SIGNER: KeyPairSigner;
+  let DESTINATION_ACCOUNT_ADDRESS: Address;
+  let latestBlockhash: any;
+  const rpc = createSolanaRpc('http://127.0.0.1:8899');
+  const rpcSubscriptions = createSolanaRpcSubscriptions('ws://127.0.0.1:8900');
+
+  const sendAndConfirmTransaction = sendAndConfirmTransactionFactory({
+      rpc,
+      rpcSubscriptions,
+  });
+
+  before("Is initialized!", async () => {
+
+    SOURCE_ACCOUNT_SIGNER = await createKeyPairSignerFromBytes(
+        new Uint8Array(
+            [2, 194, 94, 194, 31, 15, 34, 248, 159, 9, 59, 156, 194, 152, 79, 148, 81, 17, 63, 53, 245, 175, 37, 0, 134, 90, 111, 236, 245, 160, 3, 50, 196, 59, 123, 60, 59, 151, 65, 255, 27, 247, 241, 230, 52, 54, 143, 136, 108, 160, 7, 128, 4, 14, 232, 119, 234, 61, 47, 158, 9, 241, 48, 140],
+        ), // Address: ED1WqT2hWJLSZtj4TtTdoovmpMrr7zpkUdbfxmcJR1Fq
+    );
+    DESTINATION_ACCOUNT_ADDRESS = address('GdG9JHTSWBChvf6dfBATEYCZbDwKtcC6tJEpqoyuVfqV');
+    const sig = await rpc.requestAirdrop(
+      SOURCE_ACCOUNT_SIGNER.address,
+      lamports(BigInt(1 * anchor.web3.LAMPORTS_PER_SOL))
+    ).send();
+
+    // 3. Confirm the transaction
+    const confirmSignature = createRecentSignatureConfirmationPromiseFactory({
+        rpc,
+        rpcSubscriptions
+    });
+const abortController = new AbortController();
+await confirmSignature({
+    signature: sig,
+    commitment: 'confirmed',
+    abortSignal: abortController.signal,
+});
+
+    console.log("Airdrop confirmed!");
+    const { value: latestBlockhashTmp } = await rpc.getLatestBlockhash().send();
+    latestBlockhash = latestBlockhashTmp;
+  });
+  it("Is initialized!", async () => {
+
+    let ix = await program.methods.initialize().instruction();
+    const instruction = fromLegacyTransactionInstruction(ix);
+    const transactionMessage = pipe(
+      createTransactionMessage({ version: 0 }),
+      (tx) => setTransactionMessageFeePayerSigner(SOURCE_ACCOUNT_SIGNER, tx),
+      (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
+      (tx) => appendTransactionMessageInstructions([instruction], tx)
+    );
+
+
+    const signedTransaction = await signTransactionMessageWithSigners(
+      transactionMessage
+    );
+    assertIsSendableTransaction(signedTransaction);
+    assertIsTransactionWithBlockhashLifetime(signedTransaction);
+
+    try {
+        assertIsSendableTransaction(signedTransaction);
+        assertIsTransactionWithBlockhashLifetime(signedTransaction);
+        await sendAndConfirmTransaction(signedTransaction, { commitment: 'confirmed', skipPreflight: true });
+    } catch (e) {
+        if (isSolanaError(e, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)) {
+            const preflightErrorContext = e.context;
+            const preflightErrorMessage = e.message;
+            console.error(preflightErrorMessage);
+            console.error(preflightErrorContext);
+        } else {
+            throw e;
+        }
+    }
   });
   // after(() => {
   //   // Save all benchmarks after the suite completes
   //   getCumulus().saveToFile();
   // });
 
-  it("Solana sendTransaction (VersionedTransaction)", async () => {
-    // const { result, summary } = await bench("my test", async () => {
-    // const { blockhash } = await connection.getLatestBlockhash();
-
-    // Send RPC requests.
-    // const wallet = address('1234..5678');
-    // const { value: balance } = await rpc.getBalance(wallet).send();
-    const [payer] = await Promise.all([generateKeyPairSigner()]);
-
-    let ix = await program.methods.initialize().instruction();
-    const instruction = fromLegacyTransactionInstruction(ix);
-    const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
-
-    const transactionMessage = pipe(
-      createTransactionMessage({ version: 0 }),
-      (tx) => setTransactionMessageFeePayerSigner(payer, tx),
-      (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
-      (tx) => appendTransactionMessageInstructions([instruction], tx)
-      // (tx) => estimateAndSetComputeUnitLimitFactory(tx)
-    );
-
-    // const transaction = compileTransaction(transactionMessage);
-
-    const signedTransaction = await signTransactionMessageWithSigners(
-      transactionMessage
-    );
-    assertIsSendableTransaction(signedTransaction);
-
-    signedTransaction satisfies SendableTransaction;
-    // assertIsTransactionWithinSizeLimit(signedTransaction);
-    // assertIsTransactionMessageWithBlockhashLifetime(signedTransaction);
-
-    const transactionSignature = getSignatureFromTransaction(signedTransaction);
-    await sendAndConfirmTransaction(signedTransaction, {
-      commitment: "confirmed",
-    });
-
-    // tx.sign([anchor.getProvider().wallet.payer]);
-    // let sig = await anchor.getProvider().connection.sendTransaction(tx, {skipPreflight: true});
-    // await connection.confirmTransaction(
-    //   {
-    //     signature: sig,
-    //     blockhash,
-    //     lastValidBlockHeight: (
-    //       await connection.getLatestBlockhash()
-    //     ).lastValidBlockHeight,
-    //   },
-    //   "processed"
-    // );
-    // });
-  });
-
-  // it("Anchor rpc send", async () => {
-  //   const { result, summary } = await bench("my test", async () => {
-  //     await program.methods.initialize().rpc();
-  //   });
-  // });
-
-  // it("Solana sendTransaction (VersionedTransaction)", async () => {
-  //   const { result, summary } = await bench("my test", async () => {
-  //     const { blockhash } = await connection.getLatestBlockhash();
-
-  //     let ix = await program.methods.initialize().instruction();
-  //     // Create the transaction message
-  //     const message = new TransactionMessage({
-  //       payerKey: anchor.getProvider().wallet.publicKey,
-  //       recentBlockhash: blockhash,
-  //       instructions: [ix],
-  //     }).compileToV0Message();
-  //     let tx = new VersionedTransaction(message);
-  //     tx.sign([anchor.getProvider().wallet.payer]);
-  //     let sig = await anchor.getProvider().connection.sendTransaction(tx);
-  //     await connection.confirmTransaction(
-  //       {
-  //         signature: sig,
-  //         blockhash,
-  //         lastValidBlockHeight: (
-  //           await connection.getLatestBlockhash()
-  //         ).lastValidBlockHeight,
-  //       },
-  //       "processed"
-  //     );
-  //   });
-  // });
-
-  // it("Missing logs - not waiting for confirmation", async () => {
-  //   const { result, summary } = await bench("my test", async () => {
-  //     const { blockhash } = await connection.getLatestBlockhash();
-
-  //     let ix = await program.methods.initialize().instruction();
-  //     // Create the transaction message
-  //     const message = new TransactionMessage({
-  //       payerKey: anchor.getProvider().wallet.publicKey,
-  //       recentBlockhash: blockhash,
-  //       instructions: [ix],
-  //     }).compileToV0Message();
-  //     let tx = new VersionedTransaction(message);
-  //     tx.sign([anchor.getProvider().wallet.payer]);
-  //     let sig = await anchor.getProvider().connection.sendTransaction(tx);
-  //   });
-  // });
-
-  // it("Solana sendTransaction with multiple failed and successful instructions", async () => {
-  //   const { result, summary } = await bench("my test", async () => {
-  //     const { blockhash } = await connection.getLatestBlockhash();
-
-  //     let ix1 = await program.methods.initialize().instruction();
-  //     let ix2 = await program.methods
-  //       .test()
-  //       .accounts({ user: user.publicKey })
-  //       .instruction();
-  //     let ix3 = await program.methods.testSimpleError().instruction();
-  //     // Create the transaction message
-  //     const message = new TransactionMessage({
-  //       payerKey: anchor.getProvider().wallet.publicKey,
-  //       recentBlockhash: blockhash,
-  //       instructions: [ix1, ix2, ix3],
-  //     }).compileToV0Message();
-  //     let tx = new VersionedTransaction(message);
-  //     tx.sign([anchor.getProvider().wallet.payer, user]);
-  //     try {
-  //       let sig = await anchor.getProvider().connection.sendTransaction(tx);
-  //       await connection.confirmTransaction(
-  //         {
-  //           signature: sig,
-  //           blockhash,
-  //           lastValidBlockHeight: (
-  //             await connection.getLatestBlockhash()
-  //           ).lastValidBlockHeight,
-  //         },
-  //         "confirmed"
-  //       );
-  //     } catch (error) {
-  //       // everything under control
-  //     }
-  //     // test that the failed transactions will have correct transaction id even if successful transactions are included
-  //     await program.methods.test().rpc();
-  //     try {
-  //       let mint = Keypair.generate();
-  //       await program.methods
-  //         .testWithError()
-  //         .accounts({ user: user.publicKey, mint: mint.publicKey })
-  //         .signers([user, mint])
-  //         .rpc({ skipPreflight: true });
-  //     } catch (error) {
-  //       // everything under control
-  //     }
-  //   });
-  // });
-
-  // it("Solana sendAndConfirmTransaction", async () => {
-  //   const { result, summary } = await bench("my test", async () => {
-  //     const { blockhash } = await connection.getLatestBlockhash();
-
-  //     let tx = await program.methods.initialize().transaction();
-  //     let sig = await sendAndConfirmTransaction(connection, tx, [
-  //       anchor.getProvider().wallet.payer,
-  //     ]);
-  //   });
-  // });
-
-  // it("Test", async () => {
-  //   const { result, summary } = await bench("my test 2", async () => {
-  //     const tx = await program.methods
-  //       .test()
-  //       .accounts({ user: user.publicKey })
-  //       .signers([user])
-  //       .rpc();
-  //   });
-  //   // console.log("bench summary", summary);
-  // });
-
-  // it("Composed Tx", async () => {
-  //   const { result, summary } = await bench("composed tx bench", async () => {
-  //     let tx = await program.methods.initialize().rpc();
-  //     tx = await program.methods
-  //       .test()
-  //       .accounts({ user: user.publicKey })
-  //       .signers([user])
-  //       .rpc();
-  //   });
-  // });
-
-  // it("CPI", async () => {
-  //   const { result, summary } = await bench("cpi bench", async () => {
-  //     let mint = Keypair.generate();
-  //     await program.methods
-  //       .testWithCpi()
-  //       .accounts({ user: user.publicKey, mint: mint.publicKey })
-  //       .signers([user, mint])
-  //       .rpc();
-  //   });
-  //   // console.log(summary);
-  // });
-
-  // it.skip("Error", async () => {
-  //   const { result, summary } = await bench("cpi bench", async () => {
-  //     let mint = Keypair.generate();
-  //     await program.methods
-  //       .testWithError()
-  //       .accounts({ user: user.publicKey, mint: mint.publicKey })
-  //       .signers([user, mint])
-  //       .rpc({ skipPreflight: true });
-  //   });
-  // });
 });
-
-async function airdrop(
-  connection: Connection,
-  user: Keypair,
-  amount: number = 100000000
-) {
-  const tx = await connection.requestAirdrop(user.publicKey, amount);
-  await connection.confirmTransaction(tx);
-}
-function estimateAndSetComputeUnitLimitFactory(
-  ...params: Parameters<typeof estimateComputeUnitLimitFactory>
-) {
-  const estimateComputeUnitLimit = estimateComputeUnitLimitFactory(...params);
-  return async <
-    T extends BaseTransactionMessage & TransactionMessageWithFeePayer
-  >(
-    transactionMessage: T
-  ) => {
-    const computeUnitsEstimate = await estimateComputeUnitLimit(
-      transactionMessage
-    );
-    return appendTransactionMessageInstruction(
-      getSetComputeUnitLimitInstruction({ units: computeUnitsEstimate }),
-      transactionMessage
-    );
-  };
-}
